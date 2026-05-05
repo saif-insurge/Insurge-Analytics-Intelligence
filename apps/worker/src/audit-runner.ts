@@ -191,19 +191,10 @@ export async function runAuditPipeline(
     });
   }
 
-  // Helper: check if URL looks like a specific page type
-  function urlLooksLike(pageUrl: string, type: "product" | "cart" | "checkout"): boolean {
-    const lower = pageUrl.toLowerCase();
-    if (type === "product") return /\/(products?|item|p)\//.test(lower);
-    if (type === "cart") return /\/(cart|bag|basket)/.test(lower);
-    if (type === "checkout") return /\/(checkout|checkouts?|order|payment)/.test(lower);
-    return false;
-  }
-
   // Helper: safe ATC click (filters stop-list)
   async function clickAddToCart(): Promise<boolean> {
     const atcButtons = await stagehand.observe(
-      "find the add to cart button or add to bag button",
+      "find the add to cart button or add to bag button on this page",
       { timeout: 8000 },
     );
     if (atcButtons.length > 0) {
@@ -214,10 +205,25 @@ export async function runAuditPipeline(
         return true;
       }
     }
-    // Fallback
     await stagehand.act("click the add to cart button", { timeout: 10000 });
     await page.waitForTimeout(3000);
     return true;
+  }
+
+  // Helper: try remove from cart if available
+  async function tryRemoveFromCart(): Promise<boolean> {
+    try {
+      const removeButtons = await stagehand.observe(
+        "find a remove button, delete button, or trash icon next to a cart item that would remove it from the cart",
+        { timeout: 5000 },
+      );
+      if (removeButtons.length > 0) {
+        await stagehand.act(removeButtons[0]!);
+        await page.waitForTimeout(2000);
+        return true;
+      }
+    } catch { /* no remove button */ }
+    return false;
   }
 
   // ─── 3. Walk the funnel ───────────────────────────────────────────
@@ -231,8 +237,31 @@ export async function runAuditPipeline(
       } catch { /* no popup */ }
     });
 
-    // ── Step 2: CATEGORY PAGE ──────────────────────────────────────
+    // ── Step 2: TEST ATC ON HOMEPAGE (if product cards exist) ──────
+    await runStep("home_atc_test", "Test if add-to-cart is available directly from homepage product cards", async () => {
+      const quickAddButtons = await stagehand.observe(
+        "find any quick-add, add to cart, or add to bag button on a product card on this page. " +
+        "These are small buttons on product listing cards, NOT the main page add-to-cart button.",
+        { timeout: 5000 },
+      );
+      if (quickAddButtons.length > 0) {
+        const safe = quickAddButtons.filter((b) => !isPaymentAction(b.description ?? ""));
+        if (safe.length > 0) {
+          await stagehand.act(safe[0]!);
+          await page.waitForTimeout(3000);
+          // Try remove after quick-add to clean up
+          await tryRemoveFromCart();
+        }
+      }
+      // No quick-add available is fine — not all sites have it on homepage
+    });
+
+    // ── Step 3: CATEGORY PAGE ──────────────────────────────────────
     await runStep("category", "Navigate to a category/collection page showing multiple products", async () => {
+      // Navigate back to homepage first if we're somewhere else
+      await page.goto(url, { waitUntil: "networkidle", timeoutMs: 15000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+
       await stagehand.act(
         "click on a product category or collection link in the navigation menu. " +
         "Look for links like 'Shop', 'Collections', 'Men', 'Women', or 'All Products'. " +
@@ -242,31 +271,47 @@ export async function runAuditPipeline(
       await page.waitForTimeout(3000);
     });
 
-    // ── Step 3: PRODUCT DETAIL PAGE ────────────────────────────────
+    // ── Step 4: TEST ATC ON CATEGORY PAGE (if quick-add exists) ───
+    await runStep("category_atc_test", "Test if quick-add to cart is available on category page product cards", async () => {
+      const quickAddButtons = await stagehand.observe(
+        "find any quick-add, add to cart, or add to bag button on a product card in the product listing. " +
+        "These are small buttons that appear on hover or are always visible on product cards.",
+        { timeout: 5000 },
+      );
+      if (quickAddButtons.length > 0) {
+        const safe = quickAddButtons.filter((b) => !isPaymentAction(b.description ?? ""));
+        if (safe.length > 0) {
+          await stagehand.act(safe[0]!);
+          await page.waitForTimeout(3000);
+          await tryRemoveFromCart();
+        }
+      }
+    });
+
+    // ── Step 5: PRODUCT DETAIL PAGE ────────────────────────────────
     await runStep("product", "Click on a product to visit its detail page (PDP)", async () => {
       await stagehand.act(
         "click on the first product in the product listing or grid to view its details page. " +
-        "Make sure you click the product link/image that navigates to the product detail page, " +
-        "not a quick-add or add-to-cart button.",
+        "Click the product image or product name link that navigates to the product detail page, " +
+        "NOT a quick-add or add-to-cart button.",
         { timeout: 15000 },
       );
       await page.waitForTimeout(3000);
 
-      // Verify we actually landed on a product page
+      // Verify we landed on a product page — retry if needed
       const currentUrl = await page.url();
-      if (!urlLooksLike(currentUrl, "product")) {
-        // Try once more — the AI might have clicked wrong
+      if (!/\/(products?|item|p)\//i.test(currentUrl)) {
         await stagehand.act(
-          "I need to be on a product detail page showing one product with its price, description, " +
-          "and add-to-cart button. Click on a product to navigate to its detail page.",
+          "I need to navigate to a product detail page that shows one product with its full description, " +
+          "price, images, and an add-to-cart button. Click on a product link or image.",
           { timeout: 10000 },
         );
         await page.waitForTimeout(3000);
       }
     });
 
-    // ── Step 4: SELECT VARIANT ──────────────────────────────────────
-    await runStep("variant_selection", "Select first available variant (size/color) if options exist", async () => {
+    // ── Step 6: SELECT VARIANT ON PDP ──────────────────────────────
+    await runStep("variant_selection", "Select first available variant (size/color) if options exist on PDP", async () => {
       const variantOptions = await stagehand.observe(
         "find any size, color, or variant selector options on this product page",
         { timeout: 8000 },
@@ -280,55 +325,85 @@ export async function runAuditPipeline(
       }
     });
 
-    // ── Step 5: ADD TO CART (on PDP) ───────────────────────────────
-    await runStep("add_to_cart", "Click the add to cart button on the product page", async () => {
+    // ── Step 7: ADD TO CART ON PDP ─────────────────────────────────
+    await runStep("pdp_add_to_cart", "Click the add to cart button on the product detail page", async () => {
       await clickAddToCart();
     });
 
-    // ── Step 6: VIEW CART ──────────────────────────────────────────
-    // Try multiple strategies: direct URL, cart icon, cart drawer
-    await runStep("cart", "Navigate to cart — try cart page URL, then cart icon, then cart drawer", async () => {
-      const urlBefore = await page.url();
+    // ── Step 8: VIEW CART ──────────────────────────────────────────
+    // Click the cart icon in the header to see if it opens a drawer or navigates to cart page
+    await runStep("cart", "Click cart icon to view cart (detect if cart page or cart drawer)", async () => {
+      // First: click the cart icon in the site header/navigation
+      await stagehand.act(
+        "click the shopping cart icon or cart link in the website header or navigation bar. " +
+        "This is usually in the top-right corner and shows the number of items in the cart. " +
+        "Do NOT click 'View Cart' inside a popup — click the main cart icon in the header.",
+        { timeout: 10000 },
+      );
+      await page.waitForTimeout(3000);
 
-      // Strategy 1: Try clicking a "View Cart" or "Go to Cart" link/button
-      // (often appears after ATC in a mini-cart or notification)
+      // Check: did a cart drawer/sidebar open, or did we navigate to a cart page?
+      const currentUrl = await page.url();
+      if (/\/(cart|bag|basket)/i.test(currentUrl)) {
+        // Navigated to cart page — good
+        return;
+      }
+
+      // URL didn't change — likely a cart drawer opened
+      // Try to find a "View Cart" link inside the drawer to go to the full cart page
       try {
         await stagehand.act(
-          "Look for and click a 'View Cart', 'Go to Cart', 'View Bag', or cart icon link. " +
-          "This might be in a notification that appeared after adding to cart, " +
-          "in a slide-out cart drawer, or in the header navigation. " +
-          "The goal is to see the full cart with all items and a checkout button.",
-          { timeout: 10000 },
+          "look inside the cart drawer or cart sidebar that just opened and click 'View Cart', " +
+          "'Go to Cart', or 'View Bag' link to navigate to the full cart page.",
+          { timeout: 8000 },
         );
         await page.waitForTimeout(3000);
-      } catch { /* Strategy 1 failed */ }
-
-      const urlAfterStrategy1 = await page.url();
-
-      // Strategy 2: If URL didn't change, try navigating to /cart directly
-      if (urlAfterStrategy1 === urlBefore) {
-        try {
-          const cartUrl = new URL("/cart", url).href;
-          await page.goto(cartUrl, { waitUntil: "networkidle", timeoutMs: 15000 }).catch(() => {});
-          await page.waitForTimeout(3000);
-        } catch { /* Direct /cart navigation failed */ }
+      } catch {
+        // Cart drawer is open but no "View Cart" link — that's OK, we can checkout from here
       }
     });
 
-    // ── Step 7: BEGIN CHECKOUT ──────────────────────────────────────
+    // ── Step 9: TEST REMOVE FROM CART ──────────────────────────────
+    await runStep("remove_from_cart", "Test remove from cart interaction", async () => {
+      const removed = await tryRemoveFromCart();
+      if (removed) {
+        // Re-add the item so we can proceed to checkout
+        await page.goto(url, { waitUntil: "networkidle", timeoutMs: 15000 }).catch(() => {});
+        await page.waitForTimeout(2000);
+        // Navigate back to a product and add to cart again
+        await stagehand.act(
+          "click on any product to go to its detail page",
+          { timeout: 10000 },
+        );
+        await page.waitForTimeout(3000);
+        await clickAddToCart();
+      }
+    });
+
+    // ── Step 10: BEGIN CHECKOUT ─────────────────────────────────────
     // HARD STOP — never proceed past the checkout page
-    await runStep("checkout", "Navigate to checkout page where shipping/payment info is collected", async () => {
-      // First check if we're already on checkout (some sites go straight to checkout from ATC)
+    await runStep("checkout", "Click checkout button to reach the checkout/payment page", async () => {
+      // Check if we're already on checkout
       const currentUrl = await page.url();
-      if (urlLooksLike(currentUrl, "checkout")) {
-        return; // Already here
+      if (/\/(checkout|payment|order)/i.test(currentUrl)) {
+        return;
       }
 
-      // Try to find and click the checkout button
+      // First make sure we can see the cart (cart page or cart drawer)
+      // Click cart icon to ensure cart is visible
+      try {
+        await stagehand.act(
+          "click the shopping cart icon in the header to open the cart",
+          { timeout: 8000 },
+        );
+        await page.waitForTimeout(2000);
+      } catch { /* cart might already be open */ }
+
+      // Now find and click the checkout button
       const checkoutButtons = await stagehand.observe(
-        "find the checkout button, 'Proceed to Checkout', 'Go to Checkout', or 'Buy Now' button. " +
-        "This should be a button that takes me to the page where I enter shipping address and payment details. " +
-        "Do NOT look for 'Place Order', 'Complete Purchase', or 'Pay Now' buttons.",
+        "find the 'Checkout', 'Proceed to Checkout', 'Go to Checkout', or 'Secure Checkout' button. " +
+        "This is the button that takes you to the page where you enter shipping address and payment details. " +
+        "It is usually at the bottom of the cart. Do NOT click 'Place Order' or 'Pay Now'.",
         { timeout: 8000 },
       );
 
@@ -337,23 +412,12 @@ export async function runAuditPipeline(
         await stagehand.act(safe[0]!);
         await page.waitForTimeout(5000);
       } else {
-        // Fallback: try direct act
+        // No observe results — try direct act
         await stagehand.act(
-          "click the checkout button or proceed to checkout button to go to the checkout page",
+          "click the checkout button to proceed to the checkout page where shipping and payment info is entered",
           { timeout: 10000 },
         );
         await page.waitForTimeout(5000);
-      }
-
-      // Verify we reached checkout
-      const afterUrl = await page.url();
-      if (!urlLooksLike(afterUrl, "checkout")) {
-        // Try direct navigation to /checkout
-        try {
-          const checkoutUrl = new URL("/checkout", url).href;
-          await page.goto(checkoutUrl, { waitUntil: "networkidle", timeoutMs: 15000 }).catch(() => {});
-          await page.waitForTimeout(3000);
-        } catch { /* Direct /checkout navigation failed */ }
       }
     });
   } finally {
