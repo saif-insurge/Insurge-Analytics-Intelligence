@@ -43,6 +43,19 @@ type AiAnalysisData = {
   estimatedCostUsd?: number;
 };
 
+type FunnelStepLogData = {
+  step: number;
+  name: string;
+  instruction: string;
+  urlBefore: string;
+  urlAfter: string;
+  success: boolean;
+  error?: string;
+  eventsCaptureDuringStep: number;
+  timestamp: string;
+  durationMs: number;
+};
+
 type Audit = {
   id: string;
   url: string;
@@ -60,6 +73,7 @@ type Audit = {
   events: CapturedEvent[] | null;
   aiAnalysis: AiAnalysisData | null;
   detectedPlatforms: DetectedPlatformData[] | null;
+  funnelLog: FunnelStepLogData[] | null;
 };
 
 /** Canonical GA4 ecommerce funnel events in order. */
@@ -265,6 +279,11 @@ export default function AuditDetailPage() {
               }
             }}
           />
+
+          {/* Funnel Walk Log */}
+          {audit.funnelLog && audit.funnelLog.length > 0 && (
+            <FunnelLogSection steps={audit.funnelLog} />
+          )}
 
           {/* AI Analysis & Detected Platforms */}
           {(audit.aiAnalysis || audit.detectedPlatforms) ? (
@@ -575,6 +594,62 @@ function EcommerceEventsSection({ events }: { events: CapturedEvent[] }) {
       )}
     </div>
   );
+}
+
+function FunnelLogSection({ steps }: { steps: FunnelStepLogData[] }) {
+  return (
+    <div className="mb-8">
+      <h2 className="font-display text-xl font-semibold mb-4">Funnel Walk Log</h2>
+      <div className="glass rounded-lg overflow-hidden">
+        <div className="divide-y divide-border-subtle">
+          {steps.map((step) => (
+            <div key={step.step} className="px-5 py-3">
+              <div className="flex items-center gap-3 mb-1.5">
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${step.success ? "bg-success/10 text-success" : "bg-danger/10 text-danger"}`}>
+                  {step.success ? "✓" : "✗"}
+                </span>
+                <span className="text-sm font-medium capitalize">{step.name.replace(/_/g, " ")}</span>
+                <span className="text-[10px] text-text-faint font-mono">{step.durationMs}ms</span>
+                {step.eventsCaptureDuringStep > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 bg-accent/10 text-accent rounded">
+                    {step.eventsCaptureDuringStep} events
+                  </span>
+                )}
+              </div>
+              <div className="ml-8 space-y-1">
+                <p className="text-xs text-text-muted">{step.instruction}</p>
+                <div className="flex items-center gap-2 text-[10px] font-mono">
+                  <span className="text-text-faint truncate max-w-xs" title={step.urlBefore}>
+                    {shortenUrl(step.urlBefore)}
+                  </span>
+                  {step.urlBefore !== step.urlAfter && (
+                    <>
+                      <span className="text-text-faint">→</span>
+                      <span className="text-accent truncate max-w-xs" title={step.urlAfter}>
+                        {shortenUrl(step.urlAfter)}
+                      </span>
+                    </>
+                  )}
+                </div>
+                {step.error && (
+                  <p className="text-[10px] text-danger mt-1">{step.error}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function shortenUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname + parsed.search.slice(0, 30);
+  } catch {
+    return url.slice(0, 60);
+  }
 }
 
 function AdPixelsSection({ platforms }: { platforms: DetectedPlatformData[] }) {

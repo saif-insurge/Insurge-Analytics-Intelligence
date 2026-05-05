@@ -20,11 +20,13 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@react-pdf/renderer": "^4.5.1",
     "@tailwindcss/postcss": "^4.2.4",
+    "@tanstack/react-query": "^5.100.9",
     "@upstash/qstash": "^2.10.1",
     "next": "^16.1.0",
     "postcss": "^8.5.14",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sonner": "^2.0.7",
     "tailwindcss": "^4.2.4",
     "zod": "^3.25.76"
   },

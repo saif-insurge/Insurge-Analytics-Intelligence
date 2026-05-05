@@ -40,12 +40,26 @@ export type AuditRunnerOptions = {
   notifyEmail?: string;
 };
 
+export type FunnelStepLog = {
+  step: number;
+  name: string;
+  instruction: string;
+  urlBefore: string;
+  urlAfter: string;
+  success: boolean;
+  error?: string;
+  eventsCaptureDuringStep: number;
+  timestamp: string;
+  durationMs: number;
+};
+
 export type AuditRunnerResult = {
   auditDoc: AuditDocument;
   eventCount: number;
   duration: number;
   har: HarCapture;
   aiAnalysis: AiAnalysisResult | null;
+  funnelLog: FunnelStepLog[];
 };
 
 /** Runs the full audit pipeline for a given URL. */
@@ -138,19 +152,58 @@ export async function runAuditPipeline(
   }
 
   const page = stagehand.context.pages()[0]!;
+  const funnelLog: FunnelStepLog[] = [];
+  let stepCounter = 0;
+
+  /** Log a funnel step with timing, URL tracking, and event counts. */
+  async function runStep(
+    name: string,
+    instruction: string,
+    action: () => Promise<void>,
+  ) {
+    stepCounter++;
+    const urlBefore = await page.url();
+    const eventsBefore = capturedEvents.length;
+    const stepStart = Date.now();
+    let success = false;
+    let error: string | undefined;
+
+    currentFunnelStep = name;
+    try {
+      await action();
+      success = true;
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+
+    const urlAfter = await page.url();
+    funnelLog.push({
+      step: stepCounter,
+      name,
+      instruction,
+      urlBefore,
+      urlAfter,
+      success,
+      error,
+      eventsCaptureDuringStep: capturedEvents.length - eventsBefore,
+      timestamp: new Date().toISOString(),
+      durationMs: Date.now() - stepStart,
+    });
+  }
 
   // ─── 3. Walk the funnel ───────────────────────────────────────────
   try {
     // Home
-    await page.goto(url, { waitUntil: "networkidle", timeoutMs: 30000 }).catch(() => {});
-    await page.waitForTimeout(3000);
-    try {
-      await stagehand.act("dismiss any cookie consent banner or popup by accepting or closing it", { timeout: 5000 });
-    } catch { /* no popup */ }
+    await runStep("home", "Navigate to homepage", async () => {
+      await page.goto(url, { waitUntil: "networkidle", timeoutMs: 30000 }).catch(() => {});
+      await page.waitForTimeout(3000);
+      try {
+        await stagehand.act("dismiss any cookie consent banner or popup by accepting or closing it", { timeout: 5000 });
+      } catch { /* no popup */ }
+    });
 
     // Category
-    currentFunnelStep = "category";
-    try {
+    await runStep("category", "Click on a product category or collection link in the navigation menu", async () => {
       await stagehand.act(
         "click on a product category or collection link in the navigation menu. " +
         "Look for links like 'Shop', 'Collections', 'Men', 'Women', or 'All Products'. " +
@@ -158,21 +211,19 @@ export async function runAuditPipeline(
         { timeout: 15000 },
       );
       await page.waitForTimeout(3000);
-    } catch { /* couldn't navigate */ }
+    });
 
     // Product
-    currentFunnelStep = "product";
-    try {
+    await runStep("product", "Click on the first product in the listing to view its details page", async () => {
       await stagehand.act(
         "click on the first product in the product listing or grid to view its details page",
         { timeout: 15000 },
       );
       await page.waitForTimeout(3000);
-    } catch { /* couldn't navigate */ }
+    });
 
-    // Variant selection + Add to Cart
-    currentFunnelStep = "add_to_cart";
-    try {
+    // Variant selection
+    await runStep("variant_selection", "Select first available variant (size/color) if options exist", async () => {
       const variantOptions = await stagehand.observe(
         "find any size, color, or variant selector options on this product page",
         { timeout: 8000 },
@@ -184,9 +235,10 @@ export async function runAuditPipeline(
           await page.waitForTimeout(1500);
         }
       }
-    } catch { /* no variants */ }
+    });
 
-    try {
+    // Add to Cart
+    await runStep("add_to_cart", "Click the add to cart / add to bag button", async () => {
       const atcButtons = await stagehand.observe(
         "find the add to cart button or add to bag button on this product page",
         { timeout: 8000 },
@@ -201,22 +253,20 @@ export async function runAuditPipeline(
         await stagehand.act("click the add to cart button", { timeout: 10000 });
         await page.waitForTimeout(3000);
       }
-    } catch { /* couldn't add to cart */ }
+    });
 
     // View cart
-    currentFunnelStep = "cart";
-    try {
+    await runStep("cart", "Navigate to cart page or open cart drawer", async () => {
       await stagehand.act(
         "navigate to the shopping cart page. Look for a cart icon, 'View Cart', 'Go to Cart', " +
         "or a cart drawer that appeared after adding to cart.",
         { timeout: 15000 },
       );
       await page.waitForTimeout(3000);
-    } catch { /* couldn't view cart */ }
+    });
 
     // Begin checkout (HARD STOP — never proceed past this)
-    currentFunnelStep = "checkout";
-    try {
+    await runStep("checkout", "Click the checkout / proceed to checkout button", async () => {
       const checkoutButtons = await stagehand.observe(
         "find the checkout button or proceed to checkout button",
         { timeout: 8000 },
@@ -229,7 +279,7 @@ export async function runAuditPipeline(
         await stagehand.act("click the checkout button or proceed to checkout", { timeout: 10000 });
         await page.waitForTimeout(3000);
       }
-    } catch { /* couldn't begin checkout */ }
+    });
   } finally {
     await stagehand.close();
   }
@@ -290,6 +340,7 @@ export async function runAuditPipeline(
         createdById: userId,
         aiAnalysis: aiAnalysis ? { summary: aiAnalysis.summary, insights: aiAnalysis.insights, ga4Present: aiAnalysis.ga4Present, tokensUsed: aiAnalysis.tokensUsed, inputTokens: aiAnalysis.inputTokens, outputTokens: aiAnalysis.outputTokens, estimatedCostUsd: aiAnalysis.estimatedCostUsd } : null,
         detectedPlatforms: aiAnalysis?.detectedPlatforms ?? null,
+        funnelLog,
       });
     } catch (err) {
       console.error("Failed to persist audit:", err);
@@ -321,5 +372,6 @@ export async function runAuditPipeline(
     duration: Date.now() - startTime,
     har: finalHar,
     aiAnalysis,
+    funnelLog,
   };
 }

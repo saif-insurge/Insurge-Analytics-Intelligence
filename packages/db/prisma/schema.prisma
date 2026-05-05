@@ -54,6 +54,7 @@ model Audit {
   pages          Json?
   aiAnalysis     Json?
   detectedPlatforms Json?
+  funnelLog      Json?
 
   operatorNotes  String?  @default("")
 
