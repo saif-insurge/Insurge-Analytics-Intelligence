@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id        String   @id
+  name      String
+  createdAt DateTime @default(now())
+  audits    Audit[]
+}
+
+model User {
+  id             String   @id
+  email          String   @unique
+  organizationId String
+  createdAt      DateTime @default(now())
+  audits         Audit[]
+}
+
+model Audit {
+  id             String      @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdById    String
+  createdBy      User        @relation(fields: [createdById], references: [id])
+
+  url            String
+  domain         String
+  status         AuditStatus @default(PENDING)
+
+  queuedAt       DateTime    @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  failedAt       DateTime?
+  failureReason  String?
+
+  platform           String?
+  platformConfidence String?
+
+  rawJsonKey     String?
+  harFileKey     String?
+  screenshotsKey String?
+  pdfReportKey   String?
+
+  overallScore   Int?
+  overallGrade   String?
+
+  findings       Finding[]
+  events         Json?
+  pages          Json?
+  aiAnalysis     Json?
+  detectedPlatforms Json?
+
+  operatorNotes  String?  @default("")
+
+  @@index([organizationId, queuedAt])
+  @@index([status])
+}
+
+enum AuditStatus {
+  PENDING
+  RUNNING
+  ANALYZING
+  RENDERING
+  COMPLETE
+  FAILED
+}
+
+model Finding {
+  id       String @id @default(cuid())
+  auditId  String
+  audit    Audit  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  ruleId   String
+  category String
+  severity String
+  status   String
+
+  title    String
+  summary  String @db.Text
+  evidence Json
+  impact   String? @db.Text
+  fix      Json?
+
+  @@index([auditId])
+}

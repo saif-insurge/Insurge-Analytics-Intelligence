@@ -1,0 +1,23 @@
+{
+  "name": "@ga4-audit/audit-core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./rules": "./src/rules/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@ga4-audit/tsconfig": "workspace:*",
+    "@types/node": "^22.19.17",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.5"
+  }
+}

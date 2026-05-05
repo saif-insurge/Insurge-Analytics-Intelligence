@@ -1,0 +1,33 @@
+{
+  "name": "@ga4-audit/worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "^3.3.0",
+    "@ga4-audit/audit-core": "workspace:*",
+    "@ga4-audit/db": "workspace:*",
+    "@hono/node-server": "^1.14.0",
+    "@upstash/qstash": "^2.10.1",
+    "dotenv": "^17.4.2",
+    "hono": "^4.7.0",
+    "openai": "^6.36.0",
+    "playwright": "^1.59.1",
+    "playwright-core": "^1.59.1",
+    "resend": "^6.12.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@ga4-audit/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}

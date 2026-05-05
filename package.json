@@ -1,0 +1,19 @@
+{
+  "name": "ga4-audit",
+  "private": true,
+  "packageManager": "pnpm@10.23.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:migrate": "pnpm --filter @ga4-audit/db migrate",
+    "db:seed": "pnpm --filter @ga4-audit/db seed",
+    "db:generate": "pnpm --filter @ga4-audit/db generate"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  }
+}

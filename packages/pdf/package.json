@@ -1,0 +1,27 @@
+{
+  "name": "@ga4-audit/pdf",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ga4-audit/audit-core": "workspace:*",
+    "@react-pdf/renderer": "^4.3.0"
+  },
+  "devDependencies": {
+    "@ga4-audit/tsconfig": "workspace:*",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "^5.8.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}
