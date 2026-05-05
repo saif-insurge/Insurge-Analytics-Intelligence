@@ -91,6 +91,7 @@ const PLATFORM_PATTERNS: PlatformPattern[] = [
     category: "pixel",
     patterns: [/facebook\.com\/tr/i, /connect\.facebook\.net.*fbevents/i, /facebook\.com\/signals/i],
     extractEvent: (url) => {
+      // Standard Meta events: PageView, ViewContent, AddToCart, Purchase, InitiateCheckout, etc.
       const match = url.match(/[?&]ev=([^&]+)/);
       return match?.[1] ? decodeURIComponent(match[1]) : null;
     },
@@ -98,22 +99,41 @@ const PLATFORM_PATTERNS: PlatformPattern[] = [
   {
     name: "TikTok Pixel",
     category: "pixel",
-    patterns: [/analytics\.tiktok\.com/i, /tiktok\.com\/i18n/i],
+    patterns: [/analytics\.tiktok\.com/i, /tiktok\.com\/i18n/i, /analytics\.tiktok\.com\/api/i],
+    extractEvent: (url) => {
+      // TikTok events: ViewContent, AddToCart, CompletePayment, PlaceAnOrder, etc.
+      const match = url.match(/[?&]event=([^&]+)/i) ?? url.match(/[?&]ev=([^&]+)/i);
+      return match?.[1] ? decodeURIComponent(match[1]) : null;
+    },
   },
   {
     name: "Pinterest Tag",
     category: "pixel",
     patterns: [/ct\.pinterest\.com/i, /pintrk/i],
+    extractEvent: (url) => {
+      // Pinterest events: pagevisit, viewcategory, addtocart, checkout, etc.
+      const match = url.match(/[?&]event=([^&]+)/i) ?? url.match(/[?&]ed=([^&]+)/i);
+      return match?.[1] ? decodeURIComponent(match[1]) : null;
+    },
   },
   {
     name: "Snapchat Pixel",
     category: "pixel",
     patterns: [/sc-static\.net.*scevent/i, /tr\.snapchat\.com/i],
+    extractEvent: (url) => {
+      // Snapchat events: PAGE_VIEW, VIEW_CONTENT, ADD_CART, PURCHASE, etc.
+      const match = url.match(/[?&]event_type=([^&]+)/i);
+      return match?.[1] ? decodeURIComponent(match[1]) : null;
+    },
   },
   {
     name: "Twitter/X Pixel",
     category: "pixel",
     patterns: [/analytics\.twitter\.com/i, /static\.ads-twitter\.com/i, /t\.co\/i\/adsct/i],
+    extractEvent: (url) => {
+      const match = url.match(/[?&]events=([^&]+)/i);
+      return match?.[1] ? decodeURIComponent(match[1]) : null;
+    },
   },
   {
     name: "LinkedIn Insight",
@@ -123,11 +143,12 @@ const PLATFORM_PATTERNS: PlatformPattern[] = [
   {
     name: "Google Ads",
     category: "ads",
-    patterns: [/googleads\.g\.doubleclick\.net/i, /pagead\/conversion/i, /google\.com\/pagead/i],
+    patterns: [/googleads\.g\.doubleclick\.net/i, /pagead\/conversion/i, /google\.com\/pagead/i, /googleadservices\.com/i],
     extractEvent: (url) => {
-      if (url.includes("conversion")) return "conversion";
-      if (url.includes("remarketing")) return "remarketing";
-      return null;
+      if (url.includes("/conversion/")) return "conversion";
+      if (url.includes("remarketing") || url.includes("1p-user-list")) return "remarketing";
+      if (url.includes("viewthroughconversion")) return "view_through_conversion";
+      return "pageview";
     },
   },
   {
