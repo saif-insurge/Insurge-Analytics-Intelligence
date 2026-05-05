@@ -4,6 +4,7 @@ import {
 } from "@clerk/nextjs";
 import "./globals.css";
 import { Navbar } from "./navbar";
+import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
   title: "Insurge — Tracking Intelligence",
@@ -24,8 +25,10 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen bg-bg text-text">
         <ClerkProvider>
-          <Navbar />
-          {children}
+          <Providers>
+            <Navbar />
+            {children}
+          </Providers>
         </ClerkProvider>
       </body>
     </html>

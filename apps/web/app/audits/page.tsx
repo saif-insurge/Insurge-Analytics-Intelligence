@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { ConfirmDeleteModal } from "@/components/confirm-delete-modal";
 
 type Audit = {
@@ -47,9 +49,7 @@ export default function AuditsPage() {
     (searchParams.get("sortOrder") as "asc" | "desc") ?? "desc",
   );
 
-  // Data state
-  const [data, setData] = useState<ApiResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Selection + delete state
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -67,8 +67,68 @@ export default function AuditsPage() {
     return () => clearTimeout(searchTimeout.current);
   }, [search]);
 
+  // Build query params string
+  const queryParams = (() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+      sortBy,
+      sortOrder,
+    });
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (statusFilter.length > 0) params.set("status", statusFilter.join(","));
+    if (scoreMin) params.set("scoreMin", scoreMin);
+    if (scoreMax) params.set("scoreMax", scoreMax);
+    return params.toString();
+  })();
+
+  // Track previous statuses for toast notifications
+  const prevStatuses = useRef<Map<string, string>>(new Map());
+
+  // TanStack Query with polling
+  const { data, isLoading: loading, refetch: fetchData } = useQuery<ApiResponse>({
+    queryKey: ["audits", queryParams],
+    queryFn: async () => {
+      const res = await fetch(`/api/audits?${queryParams}`);
+      return res.json();
+    },
+    // Poll every 5s if any audit is in progress
+    refetchInterval: (query) => {
+      const audits = query.state.data?.audits;
+      if (!audits) return false;
+      const hasInProgress = audits.some((a) =>
+        ["PENDING", "RUNNING", "ANALYZING", "RENDERING"].includes(a.status),
+      );
+      return hasInProgress ? 5000 : false;
+    },
+  });
+
+  // Toast on status changes
+  useEffect(() => {
+    if (!data?.audits) return;
+    for (const audit of data.audits) {
+      const prev = prevStatuses.current.get(audit.id);
+      if (prev && prev !== audit.status) {
+        if (audit.status === "COMPLETE") {
+          toast.success(`Audit complete: ${audit.domain}`, {
+            description: audit.overallScore !== null ? `Score: ${audit.overallScore}/100` : undefined,
+            action: {
+              label: "View",
+              onClick: () => router.push(`/audits/${audit.id}`),
+            },
+          });
+        } else if (audit.status === "FAILED") {
+          toast.error(`Audit failed: ${audit.domain}`);
+        } else if (audit.status === "RUNNING" && prev === "PENDING") {
+          toast(`Audit started: ${audit.domain}`, { description: "Browser is walking the funnel..." });
+        }
+      }
+      prevStatuses.current.set(audit.id, audit.status);
+    }
+  }, [data, router]);
+
   // Sync URL params
-  const syncUrl = useCallback(() => {
+  useEffect(() => {
     const params = new URLSearchParams();
     if (page > 1) params.set("page", String(page));
     if (pageSize !== 10) params.set("pageSize", String(pageSize));
@@ -81,33 +141,6 @@ export default function AuditsPage() {
     const qs = params.toString();
     router.replace(`/audits${qs ? `?${qs}` : ""}`, { scroll: false });
   }, [page, pageSize, debouncedSearch, statusFilter, scoreMin, scoreMax, sortBy, sortOrder, router]);
-
-  // Fetch data
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams({
-      page: String(page),
-      pageSize: String(pageSize),
-      sortBy,
-      sortOrder,
-    });
-    if (debouncedSearch) params.set("search", debouncedSearch);
-    if (statusFilter.length > 0) params.set("status", statusFilter.join(","));
-    if (scoreMin) params.set("scoreMin", scoreMin);
-    if (scoreMax) params.set("scoreMax", scoreMax);
-
-    try {
-      const res = await fetch(`/api/audits?${params}`);
-      const json = await res.json();
-      setData(json);
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
-    }
-  }, [page, pageSize, debouncedSearch, statusFilter, scoreMin, scoreMax, sortBy, sortOrder]);
-
-  useEffect(() => { fetchData(); syncUrl(); }, [fetchData, syncUrl]);
 
   // Column sort handler
   function handleSort(field: string) {
