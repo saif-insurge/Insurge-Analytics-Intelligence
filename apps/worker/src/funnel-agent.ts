@@ -8,57 +8,64 @@ import { Stagehand, tool } from "@browserbasehq/stagehand";
 import { z } from "zod";
 import type { FunnelStepLog } from "./audit-runner.js";
 
-const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel to trigger GA4 tracking events. You must be PERSISTENT and NEVER give up — complete ALL steps even if individual actions seem to fail.
+const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel, perform interactions, and verify which GA4 events fire.
 
-You MUST visit these pages in this order and call logStep after EACH page/action:
+You have TWO tools:
+- logStep: Call after each major step to record what you did
+- getEvents: Call after interactions (like clicking Add to Cart) to check which GA4 events fired
+
+═══ YOUR MISSION ═══
+Visit every page in the funnel. On pages where product cards or add-to-cart buttons are visible, test the interaction and then call getEvents to see what fired.
 
 ═══ STEP 1: HOME PAGE ═══
-- You start here after page loads
-- Scroll down to see product listings and promotions
+- You start here. Scroll down to see the page content.
+- If you see product cards with add-to-cart/quick-add buttons, click one to test, then call getEvents.
 - Call logStep with pageName="home"
 
 ═══ STEP 2: CATEGORY PAGE ═══
-- Click a product category link in the TOP NAVIGATION MENU (not footer)
-- Look for: "Shop", "Shop All", "Collections", "Men", "Women", "All Products", or any category name
-- You should see a grid/list of multiple product cards
+- Navigate via the TOP NAVIGATION MENU (not footer) — click "Shop", "Shop All", "Collections", etc.
+- You should see a grid/list of product cards.
+- If quick-add/add-to-cart buttons are visible on product cards, click one to test, then call getEvents.
 - Call logStep with pageName="category"
 
 ═══ STEP 3: PRODUCT DETAIL PAGE (PDP) ═══
-- From the category page, click on a PRODUCT NAME or PRODUCT IMAGE
-- Do NOT click quick-add buttons, wishlist icons, or color swatches
-- The URL MUST change to a new page showing one product with full details
+- Click on a PRODUCT NAME or PRODUCT IMAGE (not quick-add) to navigate to the PDP.
+- The URL MUST change. You should see one product with full details, images, price, and ATC button.
 - Call logStep with pageName="product"
 
-═══ STEP 4: ADD TO CART ═══
-- On the PDP, if there are size/color/variant selectors, pick the first available option
-- Click the "Add to Cart" or "Add to Bag" button
-- Wait 2 seconds for the site to process
-- A cart badge, notification, or drawer may appear — this confirms success
-- Even if you don't see visual confirmation, the add-to-cart event may have fired
+═══ STEP 4: ADD TO CART ON PDP ═══
+- If there are size/color/variant selectors, pick the first available option.
+- Click the "Add to Cart" or "Add to Bag" button.
+- Wait 2 seconds, then call getEvents to check if add_to_cart event fired.
+- Note in your observation what the getEvents tool returned.
 - Call logStep with pageName="add_to_cart"
 
 ═══ STEP 5: VIEW CART ═══
-- Click the cart icon/link in the site HEADER (usually top-right, may show item count/badge)
-- This will EITHER navigate to a /cart page OR open a cart drawer/sidebar on the current page
-- BOTH are valid — a cart drawer opening IS a successful cart view even if the URL doesn't change
-- If a drawer opens, note it as cartType="drawer". If you navigated to a /cart URL, note cartType="page"
-- If the cart shows 0 items, that's an observation to note, NOT a failure — mark success=true and note "cart showed 0 items" in the observation
-- Call logStep with pageName="cart" and success=true as long as the cart was visible (drawer or page)
+- Click the cart icon/button in the site HEADER (usually top-right corner).
+- This will EITHER navigate to a /cart page OR open a cart drawer/sidebar.
+- BOTH are valid — a drawer opening IS a successful cart view (success=true).
+- If a drawer opens, note cartType="drawer". If navigated to /cart, note cartType="page".
+- Cart showing 0 items is an observation, NOT a failure. Mark success=true.
+- Call getEvents to check if view_cart event fired.
+- Call logStep with pageName="cart"
 
 ═══ STEP 6: CHECKOUT ═══
-- From the cart page or cart drawer, find and click "Checkout", "Proceed to Checkout", or "Go to Checkout"
-- If you can't find a checkout button in the cart, try clicking the cart icon again and look for checkout
-- You MUST reach a page where shipping address or payment details are collected
-- STOP HERE — do not fill any forms or click any payment buttons
+- From the cart (page or drawer), click "Checkout", "Proceed to Checkout", or "Go to Checkout".
+- If no checkout button visible, try scrolling or clicking the cart icon again.
+- You should reach a page collecting shipping/payment info.
+- Call getEvents to check if begin_checkout event fired.
+- STOP HERE. Do NOT fill forms or click payment buttons.
 - Call logStep with pageName="checkout"
 
 ═══ CRITICAL RULES ═══
 1. NEVER click "Place Order", "Complete Purchase", "Pay Now", "Submit Order", "Confirm and Pay"
-2. NEVER give up early. Complete ALL 6 steps even if some actions seem to fail.
-3. If something doesn't work, try a different approach (different button, scroll more, use navigation)
-4. Call logStep after EVERY step — you should have at least 6 logStep calls total
-5. If a popup/banner/cookie consent appears, dismiss it before continuing
-6. The cart icon in the header may show a badge with the number of items — this confirms ATC worked even if no popup appeared`;
+2. NEVER give up early — complete ALL 6 steps even if some seem to fail
+3. Call logStep at least 6 times (once per step)
+4. Call getEvents after EVERY interaction (ATC clicks, cart open, checkout) to verify events
+5. In your observation, mention which GA4 events you saw fire (from getEvents)
+6. If a popup/banner appears, dismiss it first
+7. A cart drawer opening is a SUCCESS even if the URL doesn't change
+8. If something fails, try a different approach before moving on`;
 
 const stepLogSchema = z.object({
   pageName: z.string().describe("Which page: home, category, product, cart, or checkout"),
@@ -89,13 +96,24 @@ const auditResultSchema = z.object({
 
 export type FunnelAgentResult = z.infer<typeof auditResultSchema>;
 
+/** Captured event summary for the agent to inspect. */
+type EventSummary = {
+  name: string;
+  count: number;
+  hasItems: boolean;
+  latestTimestamp: string;
+};
+
 /** Run the funnel walk using Stagehand's agent API. */
 export async function runFunnelAgent(
   stagehand: Stagehand,
   siteUrl: string,
+  /** Live reference to captured events — agent can read these via getEvents tool. */
+  capturedEvents?: Array<{ name: string; items: unknown[]; capturedAt: string }>,
 ): Promise<{ agentResult: FunnelAgentResult | null; stepLogs: FunnelStepLog[] }> {
   const stepLogs: FunnelStepLog[] = [];
   let stepCounter = 0;
+  let lastEventCheckCount = 0;
 
   const agent = stagehand.agent({
     model: process.env.STAGEHAND_MODEL || "openai/gpt-4.1-mini",
@@ -122,6 +140,49 @@ export async function runFunnelAgent(
           console.log(`  [Agent Step ${stepCounter}] ${input.pageName}: ${input.action} (${input.success ? "✓" : "✗"})`);
           if (input.observation) console.log(`    → ${input.observation}`);
           return { logged: true, stepNumber: stepCounter };
+        },
+      }),
+      getEvents: tool({
+        description:
+          "Check what GA4 events have been captured so far. Call this AFTER performing an action " +
+          "(like clicking Add to Cart) to verify whether the expected GA4 event actually fired. " +
+          "Returns events captured since your last check, plus a summary of all events.",
+        inputSchema: z.object({
+          context: z.string().describe("What you just did and what event you expect (e.g., 'clicked ATC, expecting add_to_cart event')"),
+        }),
+        execute: async (input) => {
+          const events = capturedEvents ?? [];
+          const newEvents = events.slice(lastEventCheckCount);
+          lastEventCheckCount = events.length;
+
+          // Summarize by event name
+          const summary: Record<string, EventSummary> = {};
+          for (const e of events) {
+            if (!e.name) continue;
+            const existing = summary[e.name];
+            if (existing) {
+              existing.count++;
+              existing.latestTimestamp = e.capturedAt;
+              if (e.items.length > 0) existing.hasItems = true;
+            } else {
+              summary[e.name] = {
+                name: e.name,
+                count: 1,
+                hasItems: e.items.length > 0,
+                latestTimestamp: e.capturedAt,
+              };
+            }
+          }
+
+          const newEventNames = newEvents.filter((e) => e.name).map((e) => e.name);
+          console.log(`  [Events] Check after: "${input.context}" — ${newEvents.length} new events: ${newEventNames.join(", ") || "none"}`);
+
+          return {
+            totalEventsCaptured: events.length,
+            newSinceLastCheck: newEvents.length,
+            newEventNames,
+            allEventsSummary: Object.values(summary),
+          };
         },
       }),
     },
