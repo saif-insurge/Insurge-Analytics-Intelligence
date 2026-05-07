@@ -51,10 +51,15 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 - Call logStep with pageName="cart"
 
 ═══ STEP 6: CHECKOUT ═══
-- From the cart (page or drawer), click "Checkout", "Proceed to Checkout", or "Go to Checkout".
-- If no checkout button visible, try scrolling or clicking the cart icon again.
-- You should reach a page collecting shipping/payment info.
-- Call getEvents to check if begin_checkout event fired.
+- From the cart (page or drawer), find the CHECKOUT button.
+- IMPORTANT: The checkout button is NOT the "Add to Cart" button. Look specifically for text like:
+  "Checkout", "Proceed to Checkout", "Go to Checkout", "Secure Checkout", "Check Out"
+- The checkout button is typically at the BOTTOM of the cart, below the item list and total.
+- Click the checkout button. Then call getEvents to check if begin_checkout fired.
+- NOTE: begin_checkout may fire on the button CLICK itself (before any page navigation).
+  Some sites don't have a separate checkout page — the begin_checkout event fires when the
+  checkout button is clicked, even if it opens a modal or redirects to a third-party payment page.
+- If the checkout button takes you to a login page or address form, that counts as reaching checkout.
 - STOP HERE. Do NOT fill forms or click payment buttons.
 - Call logStep with pageName="checkout"
 
@@ -66,7 +71,8 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 5. In your observation, mention which GA4 events AND ad pixel events you saw fire (from getEvents)
 6. If a popup/banner appears, dismiss it first
 7. A cart drawer opening is a SUCCESS even if the URL doesn't change
-8. If something fails, try a different approach before moving on`;
+8. If something fails, try a different approach before moving on
+9. On the cart page, do NOT click "Add to Cart" again — find the CHECKOUT button instead`;
 
 const stepLogSchema = z.object({
   pageName: z.string().describe("Which page: home, category, product, cart, or checkout"),
