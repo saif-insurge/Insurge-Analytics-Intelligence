@@ -169,22 +169,26 @@ export async function runFunnelAgent(
         inputSchema: stepLogSchema,
         execute: async (input) => {
           stepCounter++;
+          // Read the REAL URL from the browser, not the agent's self-reported one
+          const page = stagehand.context.pages()[0];
+          const actualUrl = page ? await page.url() : input.currentUrl;
+
           stepLogs.push({
             step: stepCounter,
             name: input.pageName,
             instruction: input.action,
             observation: input.observation,
-            urlBefore: input.currentUrl,
-            urlAfter: input.currentUrl,
+            urlBefore: actualUrl,
+            urlAfter: actualUrl,
             success: input.success,
             error: input.error,
             eventsCaptureDuringStep: 0,
             timestamp: new Date().toISOString(),
             durationMs: 0,
           });
-          console.log(`  [Agent Step ${stepCounter}] ${input.pageName}: ${input.action} (${input.success ? "✓" : "✗"})`);
+          console.log(`  [Agent Step ${stepCounter}] ${input.pageName}: ${input.action} (${input.success ? "✓" : "✗"}) [${actualUrl}]`);
           if (input.observation) console.log(`    → ${input.observation}`);
-          return { logged: true, stepNumber: stepCounter };
+          return { logged: true, stepNumber: stepCounter, actualUrl };
         },
       }),
       getEvents: tool({
