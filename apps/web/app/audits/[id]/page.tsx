@@ -47,6 +47,7 @@ type FunnelStepLogData = {
   step: number;
   name: string;
   instruction: string;
+  observation?: string;
   urlBefore: string;
   urlAfter: string;
   success: boolean;
@@ -634,7 +635,9 @@ function FunnelLogSection({ steps }: { steps: FunnelStepLogData[] }) {
 
                   {/* Summary line — always visible */}
                   <div className="ml-8 mt-1 text-xs text-text-muted">
-                    {navigated ? (
+                    {step.observation ? (
+                      <span className="line-clamp-1">{step.observation}</span>
+                    ) : navigated ? (
                       <span>
                         Navigated to <span className="text-accent font-mono">{new URL(step.urlAfter).pathname}</span>
                       </span>
@@ -651,9 +654,17 @@ function FunnelLogSection({ steps }: { steps: FunnelStepLogData[] }) {
                   <div className="px-5 pb-4 ml-8 space-y-3 border-t border-border-subtle pt-3">
                     {/* AI instruction */}
                     <div>
-                      <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">AI Instruction</div>
+                      <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">Action</div>
                       <p className="text-xs text-text-muted">{step.instruction}</p>
                     </div>
+
+                    {/* Observation */}
+                    {step.observation && (
+                      <div>
+                        <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">Agent Observation</div>
+                        <p className="text-xs text-text leading-relaxed bg-bg-subtle rounded-md p-2.5">{step.observation}</p>
+                      </div>
+                    )}
 
                     {/* URLs */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

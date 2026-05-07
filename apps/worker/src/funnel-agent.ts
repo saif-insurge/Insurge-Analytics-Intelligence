@@ -39,10 +39,11 @@ You MUST visit these pages in this order and call logStep after EACH page/action
 
 ═══ STEP 5: VIEW CART ═══
 - Click the cart icon/link in the site HEADER (usually top-right, may show item count/badge)
-- This will either navigate to a /cart page OR open a cart drawer/sidebar
-- If a drawer opens, look for a "View Cart" or "Go to Cart" link inside it
-- If the cart appears empty, the item may still have been added — proceed anyway
-- Call logStep with pageName="cart"
+- This will EITHER navigate to a /cart page OR open a cart drawer/sidebar on the current page
+- BOTH are valid — a cart drawer opening IS a successful cart view even if the URL doesn't change
+- If a drawer opens, note it as cartType="drawer". If you navigated to a /cart URL, note cartType="page"
+- If the cart shows 0 items, that's an observation to note, NOT a failure — mark success=true and note "cart showed 0 items" in the observation
+- Call logStep with pageName="cart" and success=true as long as the cart was visible (drawer or page)
 
 ═══ STEP 6: CHECKOUT ═══
 - From the cart page or cart drawer, find and click "Checkout", "Proceed to Checkout", or "Go to Checkout"
@@ -109,15 +110,17 @@ export async function runFunnelAgent(
             step: stepCounter,
             name: input.pageName,
             instruction: input.action,
+            observation: input.observation,
             urlBefore: input.currentUrl,
             urlAfter: input.currentUrl,
             success: input.success,
             error: input.error,
-            eventsCaptureDuringStep: 0, // Will be enriched later
+            eventsCaptureDuringStep: 0,
             timestamp: new Date().toISOString(),
             durationMs: 0,
           });
           console.log(`  [Agent Step ${stepCounter}] ${input.pageName}: ${input.action} (${input.success ? "✓" : "✗"})`);
+          if (input.observation) console.log(`    → ${input.observation}`);
           return { logged: true, stepNumber: stepCounter };
         },
       }),

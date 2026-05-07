@@ -45,6 +45,7 @@ export type FunnelStepLog = {
   step: number;
   name: string;
   instruction: string;
+  observation?: string;
   urlBefore: string;
   urlAfter: string;
   success: boolean;
