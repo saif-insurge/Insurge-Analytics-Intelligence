@@ -159,7 +159,7 @@ export async function runAuditPipeline(
   // ─── 3. Walk the funnel using autonomous agent ─────────────────────
   try {
     console.log("Starting funnel agent...");
-    const { agentResult, stepLogs } = await runFunnelAgent(stagehand, url, capturedEvents);
+    const { agentResult, stepLogs } = await runFunnelAgent(stagehand, url, capturedEvents, allRequestUrls);
     funnelLog = stepLogs;
 
     if (agentResult) {

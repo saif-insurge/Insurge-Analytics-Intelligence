@@ -6,6 +6,7 @@
 
 import { Stagehand, tool } from "@browserbasehq/stagehand";
 import { z } from "zod";
+import { detectAnalyticsPlatforms } from "@ga4-audit/audit-core";
 import type { FunnelStepLog } from "./audit-runner.js";
 
 const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel, perform interactions, and verify which GA4 events fire.
@@ -62,7 +63,7 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 2. NEVER give up early — complete ALL 6 steps even if some seem to fail
 3. Call logStep at least 6 times (once per step)
 4. Call getEvents after EVERY interaction (ATC clicks, cart open, checkout) to verify events
-5. In your observation, mention which GA4 events you saw fire (from getEvents)
+5. In your observation, mention which GA4 events AND ad pixel events you saw fire (from getEvents)
 6. If a popup/banner appears, dismiss it first
 7. A cart drawer opening is a SUCCESS even if the URL doesn't change
 8. If something fails, try a different approach before moving on`;
@@ -108,12 +109,15 @@ type EventSummary = {
 export async function runFunnelAgent(
   stagehand: Stagehand,
   siteUrl: string,
-  /** Live reference to captured events — agent can read these via getEvents tool. */
+  /** Live reference to captured GA4 events. */
   capturedEvents?: Array<{ name: string; items: unknown[]; capturedAt: string }>,
+  /** Live reference to ALL network request URLs (for ad pixel detection). */
+  allRequestUrls?: string[],
 ): Promise<{ agentResult: FunnelAgentResult | null; stepLogs: FunnelStepLog[] }> {
   const stepLogs: FunnelStepLog[] = [];
   let stepCounter = 0;
   let lastEventCheckCount = 0;
+  let lastUrlCheckCount = 0;
 
   const agent = stagehand.agent({
     model: process.env.STAGEHAND_MODEL || "openai/gpt-4.1-mini",
@@ -144,28 +148,28 @@ export async function runFunnelAgent(
       }),
       getEvents: tool({
         description:
-          "Check what GA4 events have been captured so far. Call this AFTER performing an action " +
-          "(like clicking Add to Cart) to verify whether the expected GA4 event actually fired. " +
-          "Returns events captured since your last check, plus a summary of all events.",
+          "Check what tracking events have been captured. Returns GA4 events AND ad pixel activity " +
+          "(Meta Pixel, Google Ads, TikTok, Snapchat, etc.). Call this AFTER performing an action " +
+          "to verify which platforms received the event. Focus on: GA4 events, Meta Pixel events, and Google Ads conversions.",
         inputSchema: z.object({
-          context: z.string().describe("What you just did and what event you expect (e.g., 'clicked ATC, expecting add_to_cart event')"),
+          context: z.string().describe("What you just did and what you expect (e.g., 'clicked ATC, expecting add_to_cart in GA4 and AddToCart in Meta Pixel')"),
         }),
         execute: async (input) => {
+          // GA4 events
           const events = capturedEvents ?? [];
           const newEvents = events.slice(lastEventCheckCount);
           lastEventCheckCount = events.length;
 
-          // Summarize by event name
-          const summary: Record<string, EventSummary> = {};
+          const ga4Summary: Record<string, EventSummary> = {};
           for (const e of events) {
             if (!e.name) continue;
-            const existing = summary[e.name];
+            const existing = ga4Summary[e.name];
             if (existing) {
               existing.count++;
               existing.latestTimestamp = e.capturedAt;
               if (e.items.length > 0) existing.hasItems = true;
             } else {
-              summary[e.name] = {
+              ga4Summary[e.name] = {
                 name: e.name,
                 count: 1,
                 hasItems: e.items.length > 0,
@@ -174,14 +178,40 @@ export async function runFunnelAgent(
             }
           }
 
-          const newEventNames = newEvents.filter((e) => e.name).map((e) => e.name);
-          console.log(`  [Events] Check after: "${input.context}" — ${newEvents.length} new events: ${newEventNames.join(", ") || "none"}`);
+          // Ad pixels — detect from new network requests since last check
+          const urls = allRequestUrls ?? [];
+          const newUrls = urls.slice(lastUrlCheckCount);
+          lastUrlCheckCount = urls.length;
+
+          const newPlatforms = detectAnalyticsPlatforms(newUrls);
+          // Focus on the key platforms
+          const focusPlatforms = newPlatforms.filter((p) =>
+            ["Meta Pixel", "Google Ads", "TikTok Pixel", "Snapchat Pixel", "Pinterest Tag", "Twitter/X Pixel"].includes(p.name),
+          );
+
+          const newGa4Names = newEvents.filter((e) => e.name).map((e) => e.name);
+          const newPixelSummary = focusPlatforms.map((p) =>
+            `${p.name}: ${p.requestCount} req${p.detectedEvents.length > 0 ? ` (${p.detectedEvents.join(", ")})` : ""}`,
+          );
+
+          console.log(`  [Events] "${input.context}"`);
+          console.log(`    GA4: ${newGa4Names.join(", ") || "none"}`);
+          if (newPixelSummary.length > 0) console.log(`    Pixels: ${newPixelSummary.join(", ")}`);
 
           return {
-            totalEventsCaptured: events.length,
-            newSinceLastCheck: newEvents.length,
-            newEventNames,
-            allEventsSummary: Object.values(summary),
+            ga4: {
+              totalCaptured: events.length,
+              newSinceLastCheck: newEvents.length,
+              newEventNames: newGa4Names,
+              allEvents: Object.values(ga4Summary),
+            },
+            adPixels: {
+              newActivity: focusPlatforms.map((p) => ({
+                platform: p.name,
+                requests: p.requestCount,
+                events: p.detectedEvents,
+              })),
+            },
           };
         },
       }),
