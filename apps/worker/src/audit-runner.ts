@@ -92,7 +92,7 @@ export async function runAuditPipeline(
       ],
       ...(process.env.PROXY_SERVER ? {
         proxy: {
-          server: process.env.PROXY_SERVER,
+          server: process.env.PROXY_SERVER.startsWith("http") ? process.env.PROXY_SERVER : `http://${process.env.PROXY_SERVER}`,
           username: process.env.PROXY_USERNAME,
           password: process.env.PROXY_PASSWORD,
         },
@@ -113,6 +113,18 @@ export async function runAuditPipeline(
     wsEndpoint: stagehand.connectURL(),
   });
   const pwContext = browser.contexts()[0]!;
+
+  // Authenticate proxy at the CDP page level (handles cases where
+  // Stagehand doesn't pass proxy credentials to the browser correctly)
+  if (process.env.PROXY_SERVER && process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
+    const pwPage = pwContext.pages()[0];
+    if (pwPage) {
+      await pwPage.context().setHTTPCredentials({
+        username: process.env.PROXY_USERNAME,
+        password: process.env.PROXY_PASSWORD,
+      });
+    }
+  }
 
   // ─── 2. Set up network capture ───────────────────────────────────
   let currentFunnelStep = "home";
