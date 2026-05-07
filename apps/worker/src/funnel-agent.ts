@@ -25,13 +25,14 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 
 ═══ STEP 2: CATEGORY PAGE ═══
 - Navigate via the TOP NAVIGATION MENU (not footer) — click "Shop", "Shop All", "Collections", etc.
-- You should see a grid/list of product cards.
-- If quick-add/add-to-cart buttons are visible on product cards, click one to test, then call getEvents.
+- Wait for the page to load. You should see a grid/list of product cards.
+- IMPORTANT: Call logStep IMMEDIATELY after landing on the category page, BEFORE clicking any product.
 - Call logStep with pageName="category"
 
 ═══ STEP 3: PRODUCT DETAIL PAGE (PDP) ═══
-- Click on a PRODUCT NAME or PRODUCT IMAGE (not quick-add) to navigate to the PDP.
+- From the category page, click on a PRODUCT NAME or PRODUCT IMAGE (not quick-add) to navigate to the PDP.
 - The URL MUST change. You should see one product with full details, images, price, and ATC button.
+- IMPORTANT: Call logStep IMMEDIATELY after landing on the PDP, BEFORE any interactions.
 - Call logStep with pageName="product"
 
 ═══ STEP 4: ADD TO CART ON PDP ═══
@@ -63,13 +64,18 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 ═══ STEP 5: VIEW CART ═══
 - If a cart drawer already opened after Step 4 (ATC), you are already viewing the cart.
   In that case, call getEvents to check for view_cart event, note cartType="drawer", and call logStep.
-- If no cart drawer opened, click the cart icon/button in the site HEADER (usually top-right corner).
-- After clicking the cart icon, this will EITHER:
-  a) Navigate to a /cart page — note cartType="page"
-  b) Open a cart drawer/sidebar — note cartType="drawer"
-- BOTH are valid — a drawer opening IS a successful cart view (success=true).
-- Cart showing 0 items is an observation, NOT a failure. Mark success=true.
-- Call getEvents to check if view_cart event fired.
+- If no cart drawer opened:
+  1. First, SCROLL TO THE TOP of the page so the header navigation is visible.
+  2. Look for the cart element in the header. It may be labeled as:
+     - "Cart", "Bag", "Basket", or just a bag/shopping cart icon
+     - It might show a number badge (e.g., "1" or "2") indicating items
+     - It could be an SVG icon, a link, or a button — try all of these
+  3. If you can't find it by label, try scrolling to top and reading the full aria tree
+  4. Do NOT navigate directly to /cart — use the site's own cart button
+- After opening the cart (page or drawer):
+  - Note cartType="page" if URL changed, cartType="drawer" if it opened on the same page
+  - Cart showing 0 items is an observation, NOT a failure. Mark success=true.
+  - Call getEvents to check if view_cart event fired.
 - Call logStep with pageName="cart"
 
 ═══ STEP 6: CHECKOUT ═══
@@ -99,7 +105,9 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 6. If a popup/banner appears, dismiss it first
 7. A cart drawer opening is a SUCCESS even if the URL doesn't change
 8. If something fails, try a different approach before moving on
-9. On the cart page, do NOT click "Add to Cart" again — find the CHECKOUT button instead`;
+9. On the cart page, do NOT click "Add to Cart" again — find the CHECKOUT button instead
+10. Do NOT navigate directly to URLs like /cart or /checkout — always use the site's own buttons and links
+11. If you can't find the cart icon, scroll to the very TOP of the page first — the header may be out of view`;
 
 const stepLogSchema = z.object({
   pageName: z.string().describe("Which page: home, category, product, add_to_cart, buy_now_test, cart, or checkout"),
