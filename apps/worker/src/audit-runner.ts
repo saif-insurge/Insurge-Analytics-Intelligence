@@ -90,6 +90,13 @@ export async function runAuditPipeline(
         "--disable-dev-shm-usage",
         "--disable-gpu",
       ],
+      ...(process.env.PROXY_SERVER ? {
+        proxy: {
+          server: process.env.PROXY_SERVER,
+          username: process.env.PROXY_USERNAME,
+          password: process.env.PROXY_PASSWORD,
+        },
+      } : {}),
     },
   });
 
