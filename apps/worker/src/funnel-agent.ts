@@ -37,15 +37,34 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 ═══ STEP 4: ADD TO CART ON PDP ═══
 - If there are size/color/variant selectors, pick the first available option.
 - Click the "Add to Cart" or "Add to Bag" button.
-- Wait 2 seconds, then call getEvents to check if add_to_cart event fired.
-- Note in your observation what the getEvents tool returned.
+- Wait 2-3 seconds. After clicking ATC, one of these will happen:
+  a) A cart drawer/sidebar opens showing the added item — note this as "cart drawer opened"
+  b) A notification/toast appears confirming the item was added
+  c) The cart icon badge updates with a number
+  d) Nothing visible happens — that's OK, the event may still have fired
+- Call getEvents to check if add_to_cart event fired.
 - Call logStep with pageName="add_to_cart"
 
+═══ STEP 4B: BUY NOW TEST ON PDP ═══
+- After the ATC test, check if there is a "Buy Now", "Order Now", or "Buy It Now" button on the PDP.
+- If such a button exists, click it. This button may:
+  a) Navigate directly to a checkout page
+  b) Open a payment modal/drawer (Razorpay, Stripe, etc.)
+  c) Fire begin_checkout or InitiateCheckout events
+- Call getEvents immediately after clicking to check if begin_checkout fired in GA4,
+  and if InitiateCheckout fired in Meta Pixel.
+- Note what happened in your observation.
+- If a payment modal opened, close it or press back/escape before continuing.
+- Call logStep with pageName="buy_now_test"
+
 ═══ STEP 5: VIEW CART ═══
-- Click the cart icon/button in the site HEADER (usually top-right corner).
-- This will EITHER navigate to a /cart page OR open a cart drawer/sidebar.
+- If a cart drawer already opened after Step 4 (ATC), you are already viewing the cart.
+  In that case, call getEvents to check for view_cart event, note cartType="drawer", and call logStep.
+- If no cart drawer opened, click the cart icon/button in the site HEADER (usually top-right corner).
+- After clicking the cart icon, this will EITHER:
+  a) Navigate to a /cart page — note cartType="page"
+  b) Open a cart drawer/sidebar — note cartType="drawer"
 - BOTH are valid — a drawer opening IS a successful cart view (success=true).
-- If a drawer opens, note cartType="drawer". If navigated to /cart, note cartType="page".
 - Cart showing 0 items is an observation, NOT a failure. Mark success=true.
 - Call getEvents to check if view_cart event fired.
 - Call logStep with pageName="cart"
@@ -79,7 +98,7 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 9. On the cart page, do NOT click "Add to Cart" again — find the CHECKOUT button instead`;
 
 const stepLogSchema = z.object({
-  pageName: z.string().describe("Which page: home, category, product, cart, or checkout"),
+  pageName: z.string().describe("Which page: home, category, product, add_to_cart, buy_now_test, cart, or checkout"),
   action: z.string().describe("What you did on this page"),
   observation: z.string().describe("What you observed (page content, buttons found, events expected)"),
   currentUrl: z.string().describe("The current page URL"),
@@ -95,7 +114,7 @@ const auditResultSchema = z.object({
     observations: z.string().describe("What was observed on this page"),
   })),
   actionsPerformed: z.array(z.object({
-    action: z.enum(["variant_select", "add_to_cart", "view_cart", "begin_checkout"]),
+    action: z.enum(["variant_select", "add_to_cart", "buy_now", "view_cart", "begin_checkout"]),
     success: z.boolean(),
     page: z.string().describe("Which page this action was performed on"),
     details: z.string().describe("Details about the action"),
@@ -235,18 +254,18 @@ export async function runFunnelAgent(
   try {
     const result = await agent.execute({
       instruction:
-        `You are auditing ${siteUrl}. Complete ALL 6 steps of the ecommerce funnel walkthrough:\n\n` +
+        `You are auditing ${siteUrl}. Complete ALL steps of the ecommerce funnel walkthrough:\n\n` +
         `1. HOME PAGE — observe the homepage (you're already here). Call logStep.\n` +
-        `2. CATEGORY PAGE — navigate to a product listing via the top navigation menu. Call logStep.\n` +
+        `2. CATEGORY PAGE — navigate to a product listing via the top nav. Call logStep.\n` +
         `3. PRODUCT PAGE — click a product name/image to visit the PDP. Call logStep.\n` +
-        `4. ADD TO CART — select a variant if needed, then click Add to Cart. Call logStep.\n` +
-        `5. VIEW CART — click the cart icon in the header to see the cart. Call logStep.\n` +
-        `6. CHECKOUT — click the Checkout button to reach the payment page. Call logStep.\n\n` +
-        `You MUST call logStep exactly 6 times, once per step. ` +
-        `Do NOT stop early. Even if a step seems to fail, proceed to the next step. ` +
-        `If the cart looks empty after ATC, still try to navigate to checkout. ` +
+        `4. ADD TO CART — select a variant if needed, click ATC, call getEvents. Call logStep.\n` +
+        `4B. BUY NOW TEST — if a "Buy Now" button exists on PDP, click it, call getEvents, then go back. Call logStep.\n` +
+        `5. VIEW CART — if cart drawer opened after ATC use that, otherwise click cart icon. Call getEvents. Call logStep.\n` +
+        `6. CHECKOUT — from cart, click Checkout button (NOT ATC), call getEvents. Call logStep.\n\n` +
+        `Call logStep after each step. Call getEvents after every interaction (ATC, Buy Now, cart open, checkout).\n` +
+        `Do NOT stop early. If a step fails, try another approach.\n` +
         `NEVER click Place Order or Pay Now — STOP at the checkout page.`,
-      maxSteps: 40,
+      maxSteps: 45,
       output: auditResultSchema,
     });
 
