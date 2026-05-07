@@ -57,9 +57,13 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 - The checkout button is typically at the BOTTOM of the cart, below the item list and total.
 - Click the checkout button. Then call getEvents to check if begin_checkout fired.
 - NOTE: begin_checkout may fire on the button CLICK itself (before any page navigation).
-  Some sites don't have a separate checkout page — the begin_checkout event fires when the
-  checkout button is clicked, even if it opens a modal or redirects to a third-party payment page.
-- If the checkout button takes you to a login page or address form, that counts as reaching checkout.
+  After clicking checkout, ANY of these outcomes is valid — mark success=true for all:
+  a) Navigated to a /checkout page with shipping/payment forms
+  b) A checkout modal or payment drawer opened on the same page (e.g., Razorpay, Stripe, PayPal)
+  c) Redirected to a login/signup page before checkout
+  d) Redirected to a third-party payment page (e.g., Shopify checkout, PayU, etc.)
+  e) The page stayed the same but begin_checkout event fired (check getEvents)
+  All of these count as "reached checkout" — the key is that begin_checkout event fires.
 - STOP HERE. Do NOT fill forms or click payment buttons.
 - Call logStep with pageName="checkout"
 
