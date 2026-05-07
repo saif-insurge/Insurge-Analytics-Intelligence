@@ -8,40 +8,56 @@ import { Stagehand, tool } from "@browserbasehq/stagehand";
 import { z } from "zod";
 import type { FunnelStepLog } from "./audit-runner.js";
 
-const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel to trigger GA4 tracking events.
+const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel to trigger GA4 tracking events. You must be PERSISTENT and NEVER give up — complete ALL steps even if individual actions seem to fail.
 
-You MUST visit these pages in this order, and perform specific actions on each:
+You MUST visit these pages in this order and call logStep after EACH page/action:
 
-1. HOME PAGE - You start here. Scroll down to see product listings. Note what's on the page.
+═══ STEP 1: HOME PAGE ═══
+- You start here after page loads
+- Scroll down to see product listings and promotions
+- Call logStep with pageName="home"
 
-2. CATEGORY/COLLECTION PAGE - Navigate using the site's main navigation menu. Click on a link like "Shop", "Collections", "Shop All", "Men", "Women", or any product category. You should see a grid/list of multiple products.
+═══ STEP 2: CATEGORY PAGE ═══
+- Click a product category link in the TOP NAVIGATION MENU (not footer)
+- Look for: "Shop", "Shop All", "Collections", "Men", "Women", "All Products", or any category name
+- You should see a grid/list of multiple product cards
+- Call logStep with pageName="category"
 
-3. PRODUCT DETAIL PAGE (PDP) - From the category page, click on a PRODUCT NAME or PRODUCT IMAGE (not a quick-add button) to navigate to the product's detail page. You MUST see the URL change to a new page. The PDP should show one product with its full description, images, price, variant options, and an Add to Cart button.
+═══ STEP 3: PRODUCT DETAIL PAGE (PDP) ═══
+- From the category page, click on a PRODUCT NAME or PRODUCT IMAGE
+- Do NOT click quick-add buttons, wishlist icons, or color swatches
+- The URL MUST change to a new page showing one product with full details
+- Call logStep with pageName="product"
 
-4. On the PDP:
-   a. If there are size/color/variant selectors, select the first available option
-   b. Click the "Add to Cart" or "Add to Bag" button
-   c. Wait for the cart confirmation
+═══ STEP 4: ADD TO CART ═══
+- On the PDP, if there are size/color/variant selectors, pick the first available option
+- Click the "Add to Cart" or "Add to Bag" button
+- Wait 2 seconds for the site to process
+- A cart badge, notification, or drawer may appear — this confirms success
+- Even if you don't see visual confirmation, the add-to-cart event may have fired
+- Call logStep with pageName="add_to_cart"
 
-5. VIEW CART - Click the cart icon in the site header (usually top-right corner). This might:
-   - Navigate to a /cart page, OR
-   - Open a cart drawer/sidebar
-   Either way, you should see the item you added with quantity and price.
+═══ STEP 5: VIEW CART ═══
+- Click the cart icon/link in the site HEADER (usually top-right, may show item count/badge)
+- This will either navigate to a /cart page OR open a cart drawer/sidebar
+- If a drawer opens, look for a "View Cart" or "Go to Cart" link inside it
+- If the cart appears empty, the item may still have been added — proceed anyway
+- Call logStep with pageName="cart"
 
-6. CHECKOUT - From the cart (page or drawer), find and click the "Checkout", "Proceed to Checkout", or "Go to Checkout" button. You should reach a page where shipping address or payment information is collected.
+═══ STEP 6: CHECKOUT ═══
+- From the cart page or cart drawer, find and click "Checkout", "Proceed to Checkout", or "Go to Checkout"
+- If you can't find a checkout button in the cart, try clicking the cart icon again and look for checkout
+- You MUST reach a page where shipping address or payment details are collected
+- STOP HERE — do not fill any forms or click any payment buttons
+- Call logStep with pageName="checkout"
 
-CRITICAL SAFETY RULES:
-- NEVER click "Place Order", "Complete Purchase", "Pay Now", "Submit Order", "Confirm and Pay", or "Process Payment"
-- STOP immediately once you reach the checkout page. Do not fill in any forms.
-- You are only auditing, not purchasing.
-
-After each major action, call the logStep tool to record what you did.
-
-IMPORTANT NAVIGATION TIPS:
-- If a popup, banner, or cookie consent appears, dismiss it first
-- If a cart drawer opens after adding to cart, look for "View Cart" or the cart icon to see the full cart
-- If you can't find something, scroll the page or look in the footer navigation
-- Always verify you actually navigated to a new page by checking if the content changed`;
+═══ CRITICAL RULES ═══
+1. NEVER click "Place Order", "Complete Purchase", "Pay Now", "Submit Order", "Confirm and Pay"
+2. NEVER give up early. Complete ALL 6 steps even if some actions seem to fail.
+3. If something doesn't work, try a different approach (different button, scroll more, use navigation)
+4. Call logStep after EVERY step — you should have at least 6 logStep calls total
+5. If a popup/banner/cookie consent appears, dismiss it before continuing
+6. The cart icon in the header may show a badge with the number of items — this confirms ATC worked even if no popup appeared`;
 
 const stepLogSchema = z.object({
   pageName: z.string().describe("Which page: home, category, product, cart, or checkout"),
@@ -115,12 +131,18 @@ export async function runFunnelAgent(
   try {
     const result = await agent.execute({
       instruction:
-        `Walk through the ecommerce funnel on this website (${siteUrl}). ` +
-        `Visit each page (home → category → product → cart → checkout), ` +
-        `perform the required actions (select variant, add to cart, view cart, begin checkout), ` +
-        `and log each step using the logStep tool. ` +
-        `After completing the walkthrough, report what you found.`,
-      maxSteps: 35,
+        `You are auditing ${siteUrl}. Complete ALL 6 steps of the ecommerce funnel walkthrough:\n\n` +
+        `1. HOME PAGE — observe the homepage (you're already here). Call logStep.\n` +
+        `2. CATEGORY PAGE — navigate to a product listing via the top navigation menu. Call logStep.\n` +
+        `3. PRODUCT PAGE — click a product name/image to visit the PDP. Call logStep.\n` +
+        `4. ADD TO CART — select a variant if needed, then click Add to Cart. Call logStep.\n` +
+        `5. VIEW CART — click the cart icon in the header to see the cart. Call logStep.\n` +
+        `6. CHECKOUT — click the Checkout button to reach the payment page. Call logStep.\n\n` +
+        `You MUST call logStep exactly 6 times, once per step. ` +
+        `Do NOT stop early. Even if a step seems to fail, proceed to the next step. ` +
+        `If the cart looks empty after ATC, still try to navigate to checkout. ` +
+        `NEVER click Place Order or Pay Now — STOP at the checkout page.`,
+      maxSteps: 40,
       output: auditResultSchema,
     });
 
