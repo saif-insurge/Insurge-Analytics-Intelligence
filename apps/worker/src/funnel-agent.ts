@@ -11,9 +11,10 @@ import type { FunnelStepLog } from "./audit-runner.js";
 
 const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel, perform interactions, and verify which GA4 events fire.
 
-You have TWO tools:
+You have THREE tools:
 - logStep: Call after each major step to record what you did
 - getEvents: Call after interactions (like clicking Add to Cart) to check which GA4 events fired
+- checkUrl: Call after clicking a product link to verify you actually navigated to a new page
 
 ═══ YOUR MISSION ═══
 Visit every page in the funnel. On pages where product cards or add-to-cart buttons are visible, test the interaction and then call getEvents to see what fired.
@@ -30,8 +31,14 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 - Call logStep with pageName="category"
 
 ═══ STEP 3: PRODUCT DETAIL PAGE (PDP) ═══
-- From the category page, click on a PRODUCT NAME or PRODUCT IMAGE (not quick-add) to navigate to the PDP.
-- The URL MUST change. You should see one product with full details, images, price, and ATC button.
+- From the category page, click on a PRODUCT NAME or PRODUCT IMAGE to navigate to the PDP.
+- WARNING: Do NOT click color swatches, variant radio buttons, or quick-add buttons on the product CARD.
+  These look like product links but they don't navigate — they just change the selected variant.
+  Click the actual PRODUCT NAME TEXT or the main PRODUCT IMAGE.
+- After clicking, call checkUrl to verify the URL actually changed. If the URL is still the
+  collections/category page, your click hit a variant selector — try again with a different element.
+- The PDP URL usually contains /products/ or /product/ or the product name in the path.
+- You should see one product with full details, images, price, and an Add to Cart button.
 - IMPORTANT: Call logStep IMMEDIATELY after landing on the PDP, BEFORE any interactions.
 - Call logStep with pageName="product"
 
@@ -258,6 +265,21 @@ export async function runFunnelAgent(
               })),
             },
           };
+        },
+      }),
+      checkUrl: tool({
+        description:
+          "Check the ACTUAL current browser URL. Call this after clicking a product link " +
+          "to verify you actually navigated to a new page. If the URL didn't change, " +
+          "your click probably hit a variant selector instead of the product link.",
+        inputSchema: z.object({
+          expectedChange: z.string().describe("What you expected to happen, e.g., 'navigate to product detail page'"),
+        }),
+        execute: async (input) => {
+          const pg = stagehand.context.pages()[0];
+          const currentUrl = pg ? await pg.url() : "unknown";
+          console.log(`  [URL Check] Expected: ${input.expectedChange} → Actual: ${currentUrl}`);
+          return { currentUrl };
         },
       }),
     },
