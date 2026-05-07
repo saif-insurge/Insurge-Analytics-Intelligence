@@ -42,7 +42,8 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
   b) A notification/toast appears confirming the item was added
   c) The cart icon badge updates with a number
   d) Nothing visible happens — that's OK, the event may still have fired
-- Call getEvents to check if add_to_cart event fired.
+- Call getEvents to check if add_to_cart event fired. If no add_to_cart appears, wait 3 more seconds
+  and call getEvents again — some sites have delayed event firing through GTM.
 - Call logStep with pageName="add_to_cart"
 
 ═══ STEP 4B: BUY NOW TEST ON PDP ═══
@@ -51,8 +52,10 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
   a) Navigate directly to a checkout page
   b) Open a payment modal/drawer (Razorpay, Stripe, etc.)
   c) Fire begin_checkout or InitiateCheckout events
-- Call getEvents immediately after clicking to check if begin_checkout fired in GA4,
-  and if InitiateCheckout fired in Meta Pixel.
+- IMPORTANT: Wait 4-5 seconds after clicking before calling getEvents.
+  Events like begin_checkout often take a few seconds to fire because they go through
+  GTM/tag manager processing. If you check too fast, you'll miss them.
+- Call getEvents to check if begin_checkout fired in GA4 and InitiateCheckout in Meta Pixel.
 - Note what happened in your observation.
 - If a payment modal opened, close it or press back/escape before continuing.
 - Call logStep with pageName="buy_now_test"
@@ -74,7 +77,8 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 - IMPORTANT: The checkout button is NOT the "Add to Cart" button. Look specifically for text like:
   "Checkout", "Proceed to Checkout", "Go to Checkout", "Secure Checkout", "Check Out"
 - The checkout button is typically at the BOTTOM of the cart, below the item list and total.
-- Click the checkout button. Then call getEvents to check if begin_checkout fired.
+- Click the checkout button. Wait 4-5 seconds for events to fire (they go through GTM processing).
+  Then call getEvents to check if begin_checkout fired.
 - NOTE: begin_checkout may fire on the button CLICK itself (before any page navigation).
   After clicking checkout, ANY of these outcomes is valid — mark success=true for all:
   a) Navigated to a /checkout page with shipping/payment forms
