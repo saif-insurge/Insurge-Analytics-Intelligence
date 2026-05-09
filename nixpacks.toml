@@ -3,17 +3,18 @@ providers = ["node"]
 [phases.setup]
 nixPkgs = ["nodejs_22"]
 
+# Each `cmds` entry becomes its own RUN layer in Nixpacks. Globally installed
+# binaries (like pnpm via `npm install -g`) aren't always on PATH in the next
+# layer, so chain anything that depends on the previous step using &&.
 [phases.install]
 cmds = [
-  "npm install -g pnpm@10.23.0",
-  "pnpm install --frozen-lockfile",
+  "npm install -g pnpm@10.23.0 && pnpm install --frozen-lockfile",
 ]
 
 [phases.build]
 cmds = [
-  "pnpm --filter @ga4-audit/db generate",
-  "pnpm --filter @ga4-audit/web build",
+  "npm install -g pnpm@10.23.0 && pnpm --filter @ga4-audit/db generate && pnpm --filter @ga4-audit/web build",
 ]
 
 [start]
-cmd = "pnpm --filter @ga4-audit/web start"
+cmd = "npm install -g pnpm@10.23.0 > /dev/null 2>&1 && pnpm --filter @ga4-audit/web start"
