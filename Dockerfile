@@ -45,9 +45,10 @@ COPY packages/db/ ./packages/db/
 COPY packages/audit-core/ ./packages/audit-core/
 COPY apps/worker/ ./apps/worker/
 
-# Generate Prisma client and build
+# Generate Prisma client, then build worker + all its workspace dependencies (audit-core, db).
+# Turbo respects the dependency graph and builds packages in the right order.
 RUN pnpm --filter @ga4-audit/db generate
-RUN pnpm --filter @ga4-audit/worker build
+RUN pnpm exec turbo run build --filter=@ga4-audit/worker
 
 EXPOSE 8080
 

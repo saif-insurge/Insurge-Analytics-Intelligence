@@ -4,10 +4,24 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./types": "./src/types.ts",
-    "./rules": "./src/rules/index.ts"
+    ".": {
+      "tsx": "./src/index.ts",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./types": {
+      "tsx": "./src/types.ts",
+      "import": "./dist/types.js",
+      "types": "./dist/types.d.ts"
+    },
+    "./rules": {
+      "tsx": "./src/rules/index.ts",
+      "import": "./dist/rules/index.js",
+      "types": "./dist/rules/index.d.ts"
+    }
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
