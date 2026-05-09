@@ -25,10 +25,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
         position="bottom-right"
         toastOptions={{
           style: {
-            background: "#12121a",
-            border: "1px solid #2a2a3a",
-            color: "#e8e8ed",
+            background: "#15160f",
+            border: "1px solid #2c2e23",
+            color: "#ede8de",
+            borderRadius: "3px",
+            fontFamily: "Geist, Inter, system-ui, sans-serif",
+            fontSize: "13px",
           },
+          className: "!font-body",
         }}
       />
     </QueryClientProvider>

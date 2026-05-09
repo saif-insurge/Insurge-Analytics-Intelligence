@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type CostStats = {
   totalCost: number;
@@ -24,100 +25,120 @@ export default function SettingsPage() {
   }, []);
 
   return (
-    <main className="content-container py-10">
-      <h1 className="font-display text-2xl font-bold mb-2">Settings</h1>
-      <p className="text-sm text-text-muted mb-8">AI configuration and cost tracking</p>
+    <main className="content-container py-12">
+      <header className="mb-10 rise">
+        <div className="flex items-baseline justify-between gap-6 mb-1">
+          <span className="eyebrow">/ Configuration · §02</span>
+          <span className="eyebrow">Operator Console</span>
+        </div>
+        <div className="hairline mb-6" />
+        <h1 className="font-display text-[3rem] leading-[0.95] font-semibold tracking-[-0.03em]">
+          Settings<span className="text-accent">.</span>
+        </h1>
+        <p className="text-sm text-text-muted mt-3 max-w-md">
+          Model configuration, token accounting, and a running ledger of inference cost.
+        </p>
+      </header>
 
       {/* AI Model Configuration */}
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold mb-4">AI Model Configuration</h2>
-        <div className="glass rounded-lg p-5">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Model</label>
-              <div className="text-sm font-mono text-text">gpt-5.4</div>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Input Cost</label>
-              <div className="text-sm font-mono text-text">
-                ${process.env.NEXT_PUBLIC_AI_INPUT_COST ?? "2.50"} / MTok
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Output Cost</label>
-              <div className="text-sm font-mono text-text">
-                ${process.env.NEXT_PUBLIC_AI_OUTPUT_COST ?? "15.00"} / MTok
-              </div>
-            </div>
+      <Section number="01" title="Model Configuration">
+        <div className="border border-border rounded-md bg-bg-elevated/40 p-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <ConfigCell label="Model" value="gpt-5.4" mono />
+            <ConfigCell label="Input · per MTok" value={`$${process.env.NEXT_PUBLIC_AI_INPUT_COST ?? "2.50"}`} mono />
+            <ConfigCell label="Output · per MTok" value={`$${process.env.NEXT_PUBLIC_AI_OUTPUT_COST ?? "15.00"}`} mono />
           </div>
-          <p className="text-[10px] text-text-faint mt-3">
-            Pricing is configured via environment variables: AI_INPUT_COST_PER_MTOK, AI_OUTPUT_COST_PER_MTOK
+          <p className="text-[10px] text-text-faint mt-5 font-mono">
+            Pricing configured via env: AI_INPUT_COST_PER_MTOK · AI_OUTPUT_COST_PER_MTOK
           </p>
         </div>
-      </section>
+      </Section>
 
       {/* Cost Overview */}
-      <section className="mb-8">
-        <h2 className="text-lg font-semibold mb-4">AI Cost Overview</h2>
+      <Section number="02" title="Inference Ledger" subtitle="Cumulative AI spend across all audits">
         {loading ? (
-          <div className="glass rounded-lg p-8 text-center text-text-muted text-sm">Loading cost data...</div>
+          <div className="border border-border rounded-md bg-bg-elevated/40 p-12 text-center text-text-muted text-sm">
+            <div className="animate-pulse font-mono text-[11px] tracking-wider uppercase">
+              Loading ledger…
+            </div>
+          </div>
         ) : !costs ? (
-          <div className="glass rounded-lg p-8 text-center text-text-muted text-sm">Failed to load costs</div>
+          <div className="border border-danger/30 bg-danger/[0.05] rounded-md p-8 text-center text-danger text-sm">
+            Failed to load costs
+          </div>
         ) : (
           <>
-            {/* Summary cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <StatCard label="Total AI Spend" value={`$${costs.totalCost.toFixed(4)}`} />
-              <StatCard label="Audits with AI" value={String(costs.totalAudits)} />
-              <StatCard label="Avg Cost / Audit" value={`$${costs.averageCostPerAudit.toFixed(4)}`} />
-              <StatCard label="Total Tokens" value={costs.totalTokens.toLocaleString()} />
+            {/* Hero stat: total spend */}
+            <div className="border border-border rounded-md bg-bg-elevated/40 p-6 mb-3">
+              <div className="flex items-end justify-between gap-6 flex-wrap">
+                <div>
+                  <span className="eyebrow">Total AI Spend</span>
+                  <div className="font-display tnum text-[4rem] leading-none font-semibold mt-2 tracking-tight">
+                    <span className="text-accent">$</span>
+                    {costs.totalCost.toFixed(4)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-8 text-right">
+                  <Stat label="Audits" value={String(costs.totalAudits)} />
+                  <Stat label="Avg / Audit" value={`$${costs.averageCostPerAudit.toFixed(4)}`} />
+                  <Stat label="Total Tokens" value={costs.totalTokens.toLocaleString()} />
+                </div>
+              </div>
             </div>
 
             {/* Token breakdown */}
-            <div className="glass rounded-lg p-5 mb-6">
-              <h3 className="text-sm font-medium text-text-muted mb-3">Token Breakdown</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs text-text-faint">Input Tokens</div>
-                  <div className="text-lg font-semibold">{costs.totalInputTokens.toLocaleString()}</div>
-                  <div className="text-[10px] text-text-faint">
-                    ${((costs.totalInputTokens / 1_000_000) * 2.5).toFixed(4)} at $2.50/MTok
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-text-faint">Output Tokens</div>
-                  <div className="text-lg font-semibold">{costs.totalOutputTokens.toLocaleString()}</div>
-                  <div className="text-[10px] text-text-faint">
-                    ${((costs.totalOutputTokens / 1_000_000) * 15).toFixed(4)} at $15.00/MTok
-                  </div>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+              <TokenCard
+                label="Input Tokens"
+                count={costs.totalInputTokens}
+                rate={2.5}
+                rateLabel="$2.50/MTok"
+              />
+              <TokenCard
+                label="Output Tokens"
+                count={costs.totalOutputTokens}
+                rate={15.0}
+                rateLabel="$15.00/MTok"
+              />
             </div>
 
-            {/* Per-audit cost table */}
+            {/* Per-audit ledger */}
             {costs.audits.length > 0 && (
-              <div className="glass rounded-lg overflow-hidden">
-                <h3 className="text-sm font-medium text-text-muted px-5 pt-4 pb-2">Cost per Audit</h3>
+              <div className="border border-border rounded-md overflow-hidden bg-bg-elevated/40">
+                <div className="px-5 pt-4 pb-3 flex items-center gap-2">
+                  <span className="eyebrow">Cost Per Audit</span>
+                  <span className="text-text-faint text-xs font-mono">·</span>
+                  <span className="text-text-faint text-xs font-mono tnum">
+                    {costs.audits.length} entries
+                  </span>
+                </div>
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-border text-left">
-                      <th className="text-xs font-medium text-text-faint px-5 py-2">Domain</th>
-                      <th className="text-xs font-medium text-text-faint px-5 py-2">Tokens</th>
-                      <th className="text-xs font-medium text-text-faint px-5 py-2">Cost</th>
-                      <th className="text-xs font-medium text-text-faint px-5 py-2">Date</th>
+                    <tr className="border-y border-border bg-bg-subtle/40">
+                      <th className="text-left px-5 py-2.5"><span className="eyebrow">Domain</span></th>
+                      <th className="text-right px-5 py-2.5"><span className="eyebrow">Tokens</span></th>
+                      <th className="text-right px-5 py-2.5"><span className="eyebrow">Cost</span></th>
+                      <th className="text-right px-5 py-2.5"><span className="eyebrow">Date</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {costs.audits.map((a) => (
-                      <tr key={a.id} className="border-b border-border-subtle">
-                        <td className="text-sm px-5 py-2.5">
-                          <a href={`/audits/${a.id}`} className="text-text hover:text-accent transition-colors">
+                      <tr key={a.id} className="border-b border-border-subtle last:border-0 hover:bg-bg-subtle/40 transition-colors">
+                        <td className="text-sm px-5 py-3">
+                          <Link href={`/audits/${a.id}`} className="text-text hover:text-accent transition-colors inline-flex items-center gap-1.5">
                             {a.domain}
-                          </a>
+                            <span className="font-mono text-[10px] text-text-faint">→</span>
+                          </Link>
                         </td>
-                        <td className="text-xs text-text-muted px-5 py-2.5 font-mono">{a.tokens.toLocaleString()}</td>
-                        <td className="text-xs text-text-muted px-5 py-2.5 font-mono">${a.cost.toFixed(4)}</td>
-                        <td className="text-xs text-text-faint px-5 py-2.5">{new Date(a.date).toLocaleDateString()}</td>
+                        <td className="text-xs text-text-muted px-5 py-3 font-mono tnum text-right">
+                          {a.tokens.toLocaleString()}
+                        </td>
+                        <td className="text-xs text-accent px-5 py-3 font-mono tnum text-right">
+                          ${a.cost.toFixed(4)}
+                        </td>
+                        <td className="text-xs text-text-faint px-5 py-3 font-mono text-right">
+                          {new Date(a.date).toLocaleDateString()}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -126,16 +147,75 @@ export default function SettingsPage() {
             )}
           </>
         )}
-      </section>
+      </Section>
     </main>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function Section({
+  number,
+  title,
+  subtitle,
+  children,
+}: {
+  number: string;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="glass rounded-lg p-4">
-      <div className="text-xs text-text-muted mb-1">{label}</div>
-      <div className="text-lg font-semibold font-mono">{value}</div>
+    <section className="mb-12">
+      <div className="flex items-baseline gap-3 mb-4">
+        <span className="font-mono text-[11px] tracking-wider text-accent">§{number}</span>
+        <h2 className="font-display text-2xl font-semibold tracking-tight">{title}</h2>
+        {subtitle && <span className="text-xs text-text-faint">— {subtitle}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ConfigCell({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <div className="eyebrow mb-1.5">{label}</div>
+      <div className={`text-base text-text ${mono ? "font-mono tnum" : ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="eyebrow mb-1">{label}</div>
+      <div className="text-lg font-display font-semibold tnum text-text">{value}</div>
+    </div>
+  );
+}
+
+function TokenCard({
+  label,
+  count,
+  rate,
+  rateLabel,
+}: {
+  label: string;
+  count: number;
+  rate: number;
+  rateLabel: string;
+}) {
+  return (
+    <div className="border border-border rounded-md bg-bg-elevated/40 p-5">
+      <div className="eyebrow mb-2">{label}</div>
+      <div className="font-display tnum text-3xl font-semibold tracking-tight">
+        {count.toLocaleString()}
+      </div>
+      <div className="flex items-center gap-2 mt-2">
+        <span className="font-mono text-xs text-accent tnum">
+          ${((count / 1_000_000) * rate).toFixed(4)}
+        </span>
+        <span className="font-mono text-[10px] text-text-faint">@ {rateLabel}</span>
+      </div>
     </div>
   );
 }

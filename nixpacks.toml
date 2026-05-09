@@ -1,0 +1,19 @@
+providers = ["node"]
+
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = [
+  "npm install -g pnpm@10.23.0",
+  "pnpm install --frozen-lockfile",
+]
+
+[phases.build]
+cmds = [
+  "pnpm --filter @ga4-audit/db generate",
+  "pnpm --filter @ga4-audit/web build",
+]
+
+[start]
+cmd = "pnpm --filter @ga4-audit/web start"

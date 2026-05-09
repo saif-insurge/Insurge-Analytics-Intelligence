@@ -75,22 +75,34 @@ export async function runAuditPipeline(
   log("RUNNING");
 
   // ─── 1. Initialize Stagehand ──────────────────────────────────────
-  const { model } = getStagehandModelConfig();
+  const stagehandConfig = getStagehandModelConfig();
+  const headless = process.env.HEADLESS !== "false";
+  console.log(`Browser config: model=${stagehandConfig.model}, provider=${stagehandConfig.provider}, headless=${headless} (HEADLESS env="${process.env.HEADLESS ?? "unset"}")`);
+
   const stagehand = new Stagehand({
     env: "LOCAL",
-    model,
-    domSettleTimeout: 10000,
+    model: stagehandConfig.clientOptions
+      ? { modelName: stagehandConfig.model, ...stagehandConfig.clientOptions }
+      : stagehandConfig.model,
+    domSettleTimeout: 15000,
     verbose: 1,
     experimental: true,
     localBrowserLaunchOptions: {
-      headless: process.env.HEADLESS !== "false",
+      headless,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
+        // Stealth — hides Chrome's automation flags from JS detection
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-site-isolation-trials",
       ],
-      ...(process.env.PROXY_SERVER ? {
+      viewport: { width: 1440, height: 900 },
+      locale: "en-US",
+      // Proxy can be disabled for debugging by setting DISABLE_PROXY=true
+      ...(process.env.PROXY_SERVER && process.env.DISABLE_PROXY !== "true" ? {
         proxy: {
           server: process.env.PROXY_SERVER.startsWith("http") ? process.env.PROXY_SERVER : `http://${process.env.PROXY_SERVER}`,
           username: process.env.PROXY_USERNAME,
@@ -116,7 +128,8 @@ export async function runAuditPipeline(
 
   // Authenticate proxy at the CDP page level (handles cases where
   // Stagehand doesn't pass proxy credentials to the browser correctly)
-  if (process.env.PROXY_SERVER && process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
+  const proxyEnabled = process.env.PROXY_SERVER && process.env.DISABLE_PROXY !== "true";
+  if (proxyEnabled && process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
     const pwPage = pwContext.pages()[0];
     if (pwPage) {
       await pwPage.context().setHTTPCredentials({
@@ -125,60 +138,96 @@ export async function runAuditPipeline(
       });
     }
   }
+  console.log(`[Proxy] ${proxyEnabled ? `Enabled (${process.env.PROXY_SERVER})` : "Disabled"}`);
+
+  // Stealth init script — masks the most common bot-detection signals.
+  // Runs in every page (existing + new) before any site JS executes.
+  // Defeats Cloudflare/Akamai JS challenges and the navigator.webdriver check
+  // that suppresses analytics on flagged sessions.
+  // Passed as a string because the code runs in the browser, not Node.
+  const STEALTH_SCRIPT = `
+    // 1. Hide webdriver flag
+    Object.defineProperty(Navigator.prototype, "webdriver", { get: () => undefined });
+    // 2. Mock plugins (real browsers have non-empty plugin arrays)
+    Object.defineProperty(navigator, "plugins", {
+      get: () => [
+        { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "" },
+        { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "" },
+      ],
+    });
+    // 3. Mock languages
+    Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+    // 4. Add chrome runtime stub (real Chrome has window.chrome)
+    if (!window.chrome) {
+      window.chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+    }
+    // 5. Patch permissions.query to not reveal headless state
+    const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+    if (originalQuery) {
+      window.navigator.permissions.query = (parameters) =>
+        parameters.name === "notifications"
+          ? Promise.resolve({ state: Notification.permission })
+          : originalQuery.call(window.navigator.permissions, parameters);
+    }
+    // 6. Strip Playwright-injected globals if any leak through
+    delete window.__playwright;
+    delete window.__pw_manual;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+  `;
+  await pwContext.addInitScript(STEALTH_SCRIPT);
+  console.log("[Stealth] Init script attached to context — will run on all pages");
 
   // ─── 2. Set up network capture ───────────────────────────────────
-  let currentFunnelStep = "home";
-  const capturedEvents: (ParsedGa4Event & { capturedAt: string; funnelStep: string })[] = [];
-  const seenRequests = new Set<string>();
+  // Combined approach: listen at CONTEXT level (catches main page, new tabs)
+  // AND attach page-level listeners (catches cross-origin iframes which CDP-attached
+  // context-level events can miss for OOPIFs).
   const har = createHarCapture();
   const allRequestUrls: string[] = [];
+  const seen = new Set<string>(); // dedupe key: url + postData hash
 
-  // Route handler that captures GA4 events and continues the request
-  const captureAndContinue = async (route: { request: () => { url: () => string; postData: () => string | null }; continue: () => Promise<void> }) => {
-    const req = route.request();
-    const reqUrl = req.url();
-    const postData = req.postData() ?? undefined;
-    const dedupeKey = `${reqUrl}|${postData ?? ""}`;
-    if (!seenRequests.has(dedupeKey)) {
-      seenRequests.add(dedupeKey);
-      const events = parseGa4Request(reqUrl, postData);
-      for (const event of events) {
-        capturedEvents.push({
-          ...event,
-          capturedAt: new Date().toISOString(),
-          funnelStep: currentFunnelStep,
-        });
-      }
-    }
-    await route.continue();
+  const captureRequest = (request: { url: () => string; method: () => string; postData: () => string | null }) => {
+    const reqUrl = request.url();
+    const postData = request.postData() ?? undefined;
+    // Dedupe — same URL + postData arriving from both context and page listeners
+    const key = `${reqUrl}|${postData ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    allRequestUrls.push(reqUrl);
+    har.entries.push({
+      url: reqUrl,
+      method: request.method(),
+      postData,
+      timestamp: new Date().toISOString(),
+    });
   };
 
-  // GA4-specific route handlers (targeted, no slowdown)
-  await pwContext.route("**/g/collect*", captureAndContinue);
-  await pwContext.route("**/mp/collect*", captureAndContinue);
-  await pwContext.route("**/*tid=G-*", captureAndContinue);
+  console.log(`[Capture] Listener attached at CONTEXT level. Initial pages: ${pwContext.pages().length}`);
 
-  // HAR capture — record ALL request URLs via page-level listener for analytics detection
-  const pwPage = pwContext.pages()[0];
-  if (pwPage) {
-    pwPage.on("request", (request) => {
-      const reqUrl = request.url();
-      allRequestUrls.push(reqUrl);
-      har.entries.push({
-        url: reqUrl,
-        method: request.method(),
-        postData: request.postData() ?? undefined,
-        timestamp: new Date().toISOString(),
-      });
-    });
+  // Context-level listener
+  pwContext.on("request", captureRequest);
+
+  // Page-level listener — attach to existing pages and any new ones
+  // This catches requests from cross-origin iframes (OOPIFs) that context-level
+  // events sometimes miss when connected via CDP.
+  const attachPageListeners = (page: { on: (event: string, handler: (r: unknown) => void) => void; url: () => string; }) => {
+    page.on("request", captureRequest as (r: unknown) => void);
+    console.log(`[Capture] Attached page-level listener to: ${page.url()}`);
+  };
+  for (const existing of pwContext.pages()) {
+    attachPageListeners(existing as unknown as Parameters<typeof attachPageListeners>[0]);
   }
+  pwContext.on("page", (newPage) => {
+    console.log(`[Capture] New page detected: ${newPage.url()}`);
+    attachPageListeners(newPage as unknown as Parameters<typeof attachPageListeners>[0]);
+  });
 
   let funnelLog: FunnelStepLog[] = [];
 
   // ─── 3. Walk the funnel using autonomous agent ─────────────────────
   try {
     console.log("Starting funnel agent...");
-    const { agentResult, stepLogs } = await runFunnelAgent(stagehand, url, capturedEvents, allRequestUrls);
+    const { agentResult, stepLogs } = await runFunnelAgent(stagehand, url, har.entries, allRequestUrls);
     funnelLog = stepLogs;
 
     if (agentResult) {
@@ -193,10 +242,61 @@ export async function runAuditPipeline(
     await stagehand.close();
   }
 
-  // ─── 4. Assemble AuditDocument ────────────────────────────────────
+  // ─── 4. Parse GA4 events from HAR & assemble AuditDocument ────────
   log("ANALYZING");
 
   const domain = new URL(url).hostname;
+
+  // Parse all GA4 events from the complete HAR — deterministic, no race conditions
+  const capturedEvents: (ParsedGa4Event & { capturedAt: string; funnelStep: string })[] = [];
+  for (const entry of har.entries) {
+    if (!isGa4Endpoint(entry.url)) continue;
+    const parsed = parseGa4Request(entry.url, entry.postData);
+    for (const evt of parsed) {
+      capturedEvents.push({
+        ...evt,
+        capturedAt: entry.timestamp,
+        funnelStep: "unknown", // HAR doesn't track funnel step context
+      });
+    }
+  }
+  console.log(`Parsed ${capturedEvents.length} GA4 events from ${har.entries.length} HAR entries`);
+
+  // Diagnostic: how many HAR entries hit GA4-shaped URLs (helps tell if events were missed by capture vs parser)
+  const ga4UrlCount = har.entries.filter((e) => isGa4Endpoint(e.url)).length;
+  const uniqueDomains = new Set(har.entries.map((e) => { try { return new URL(e.url).hostname; } catch { return "invalid"; } }));
+  console.log(`[Capture diagnostic] GA4-shaped URLs in HAR: ${ga4UrlCount}, unique domains: ${uniqueDomains.size}`);
+
+  // Count requests to known analytics domains (regardless of whether our parser matched them)
+  const analyticsHosts = ["google-analytics.com", "analytics.google.com", "doubleclick.net", "facebook.com", "facebook.net", "googletagmanager.com", "merchant-center-analytics.goog"];
+  const hitsByHost: Record<string, number> = {};
+  for (const entry of har.entries) {
+    try {
+      const host = new URL(entry.url).hostname;
+      for (const target of analyticsHosts) {
+        if (host.endsWith(target)) {
+          hitsByHost[target] = (hitsByHost[target] ?? 0) + 1;
+          break;
+        }
+      }
+    } catch { /* skip */ }
+  }
+  console.log(`[Capture diagnostic] Analytics domain hits:`, hitsByHost);
+
+  // Show a few sample GA-collect URLs (or absence thereof)
+  const gaUrls = har.entries.filter((e) => /analytics\.google\.com|google-analytics\.com/.test(e.url)).slice(0, 5);
+  console.log(`[Capture diagnostic] Sample GA URLs (${gaUrls.length} of ${har.entries.filter((e) => /analytics\.google\.com|google-analytics\.com/.test(e.url)).length}):`);
+  for (const e of gaUrls) {
+    console.log(`  ${e.method} ${e.url.slice(0, 200)}...`);
+  }
+
+  if (har.entries.length > 0) {
+    const firstUrls = har.entries.slice(0, 3).map((e) => e.url);
+    const lastUrls = har.entries.slice(-3).map((e) => e.url);
+    console.log(`  First 3 URLs: ${firstUrls.join(", ")}`);
+    console.log(`  Last 3 URLs:  ${lastUrls.join(", ")}`);
+  }
+
   const tids = [...new Set(capturedEvents.map((e) => e.tid).filter(Boolean))];
 
   const rawCapture: RawAuditCapture = {

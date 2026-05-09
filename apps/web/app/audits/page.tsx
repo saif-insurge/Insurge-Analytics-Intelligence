@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ConfirmDeleteModal } from "@/components/confirm-delete-modal";
@@ -32,6 +33,14 @@ const STATUS_OPTIONS = ["PENDING", "RUNNING", "ANALYZING", "COMPLETE", "FAILED"]
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 export default function AuditsPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuditsPageContent />
+    </Suspense>
+  );
+}
+
+function AuditsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -51,8 +60,10 @@ export default function AuditsPage() {
 
   // Selection + delete state
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [rowDelete, setRowDelete] = useState<Audit | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
 
   // Debounce search
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -92,7 +103,6 @@ export default function AuditsPage() {
       const res = await fetch(`/api/audits?${queryParams}`);
       return res.json();
     },
-    // Poll every 5s if any audit is in progress
     refetchInterval: (query) => {
       const audits = query.state.data?.audits;
       if (!audits) return false;
@@ -157,11 +167,8 @@ export default function AuditsPage() {
   const allSelected = data?.audits.length ? data.audits.every((a) => selected.has(a.id)) : false;
   function toggleAll() {
     if (!data) return;
-    if (allSelected) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(data.audits.map((a) => a.id)));
-    }
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(data.audits.map((a) => a.id)));
   }
   function toggleOne(id: string) {
     const next = new Set(selected);
@@ -169,12 +176,36 @@ export default function AuditsPage() {
     else next.add(id);
     setSelected(next);
   }
-
   function toggleStatus(status: string) {
     setStatusFilter((prev) =>
       prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status],
     );
     setPage(1);
+  }
+
+  // Per-row actions
+  async function handleRerun(audit: Audit) {
+    setRerunningId(audit.id);
+    try {
+      const res = await fetch("/api/audits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: audit.url }),
+      });
+      const d = await res.json();
+      if (d.auditId) {
+        toast.success(`Re-running ${audit.domain}`);
+        router.push(`/audits/${d.auditId}`);
+      }
+    } finally {
+      setRerunningId(null);
+    }
+  }
+
+  function handleCopyLink(audit: Audit) {
+    const url = `${window.location.origin}/report/${audit.id}`;
+    navigator.clipboard.writeText(url);
+    toast.success("Share link copied");
   }
 
   const audits = data?.audits ?? [];
@@ -183,48 +214,75 @@ export default function AuditsPage() {
   const startItem = (page - 1) * pageSize + 1;
   const endItem = Math.min(page * pageSize, total);
 
-  return (
-    <main className="content-container py-10">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="font-display text-2xl font-bold">Audits</h1>
-          {total > 0 && <p className="text-xs text-text-faint mt-1">{total} total</p>}
-        </div>
-        <Link
-          href="/audits/new"
-          className="bg-accent hover:bg-accent-hover text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
-        >
-          + New Audit
-        </Link>
-      </div>
+  const filtersActive = !!(debouncedSearch || statusFilter.length > 0 || scoreMin || scoreMax);
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+  return (
+    <main className="content-container py-12">
+      {/* ─── Editorial Header ─────────────────────────────── */}
+      <header className="mb-10 rise">
+        <div className="flex items-baseline justify-between gap-6 mb-1">
+          <span className="eyebrow">/ Index · Vol.01 · {new Date().getFullYear()}</span>
+          <span className="eyebrow tnum">
+            <span className="text-text-muted">{total}</span> records on file
+          </span>
+        </div>
+        <div className="hairline mb-6" />
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="font-display text-[3.5rem] leading-[0.95] font-semibold tracking-[-0.03em]">
+              Field Log<span className="text-accent">.</span>
+            </h1>
+            <p className="text-sm text-text-muted mt-3 max-w-md">
+              Synthetic shoppers. Real funnels. Every GA4 event captured, every misfire
+              <span className="italic font-display"> noted</span>.
+            </p>
+          </div>
+          <Link
+            href="/audits/new"
+            className="group inline-flex items-center gap-3 bg-accent hover:bg-accent-hover text-accent-ink px-5 py-3 rounded-sm font-semibold tracking-tight transition-all hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_rgba(212,255,58,0.5)]"
+          >
+            <span className="font-mono text-sm">+</span>
+            New Audit
+            <span className="font-mono text-[10px] opacity-50 ml-1">↵</span>
+          </Link>
+        </div>
+      </header>
+
+      {/* ─── Filter Bar ─────────────────────────────── */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 rise" style={{ animationDelay: "0.05s" }}>
         {/* Search */}
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+        <div className="relative flex-1 min-w-[220px] max-w-md">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[11px] text-text-faint pointer-events-none select-none">
+            /
+          </span>
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search domains..."
-            className="w-full pl-9 pr-3 py-2 bg-bg-elevated border border-border rounded-md text-sm text-text placeholder:text-text-faint focus:outline-none focus:border-accent transition-colors"
+            placeholder="search domains"
+            className="w-full pl-7 pr-3 py-2 bg-bg-elevated border border-border rounded-sm text-sm font-mono text-text placeholder:text-text-faint/60 focus:outline-none focus:border-accent focus:bg-bg-subtle transition-colors"
           />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-faint hover:text-accent text-xs cursor-pointer"
+              aria-label="clear search"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {/* Status filter */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 px-1 py-1 bg-bg-elevated border border-border rounded-sm">
           {STATUS_OPTIONS.map((status) => (
             <button
               key={status}
               onClick={() => toggleStatus(status)}
-              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors cursor-pointer ${
+              className={`text-[10px] font-mono tracking-wider px-2.5 py-1 rounded-sm transition-all cursor-pointer ${
                 statusFilter.includes(status)
-                  ? statusBorderActive(status)
-                  : "border-border text-text-faint hover:border-border hover:text-text-muted"
+                  ? statusActive(status)
+                  : "text-text-faint hover:text-text"
               }`}
             >
               {status}
@@ -233,18 +291,18 @@ export default function AuditsPage() {
         </div>
 
         {/* Score range */}
-        <div className="flex items-center gap-1.5 text-xs text-text-muted">
-          <span>Score</span>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-elevated border border-border rounded-sm">
+          <span className="eyebrow">Score</span>
           <input
             type="number"
             value={scoreMin}
             onChange={(e) => { setScoreMin(e.target.value); setPage(1); }}
-            placeholder="0"
+            placeholder="00"
             min={0}
             max={100}
-            className="w-14 px-2 py-1.5 bg-bg-elevated border border-border rounded text-xs text-text text-center focus:outline-none focus:border-accent"
+            className="w-9 bg-transparent font-mono tnum text-xs text-text text-center focus:outline-none placeholder:text-text-faint/50"
           />
-          <span>–</span>
+          <span className="text-text-faint">→</span>
           <input
             type="number"
             value={scoreMax}
@@ -252,7 +310,7 @@ export default function AuditsPage() {
             placeholder="100"
             min={0}
             max={100}
-            className="w-14 px-2 py-1.5 bg-bg-elevated border border-border rounded text-xs text-text text-center focus:outline-none focus:border-accent"
+            className="w-9 bg-transparent font-mono tnum text-xs text-text text-center focus:outline-none placeholder:text-text-faint/50"
           />
         </div>
 
@@ -260,37 +318,58 @@ export default function AuditsPage() {
         <select
           value={pageSize}
           onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-          className="px-2 py-1.5 bg-bg-elevated border border-border rounded text-xs text-text-muted focus:outline-none focus:border-accent cursor-pointer"
+          className="px-3 py-2 bg-bg-elevated border border-border rounded-sm text-xs font-mono text-text-muted focus:outline-none focus:border-accent cursor-pointer"
         >
           {PAGE_SIZE_OPTIONS.map((size) => (
-            <option key={size} value={size}>{size} / page</option>
+            <option key={size} value={size}>{size}/page</option>
           ))}
         </select>
-      </div>
 
-      {/* Selected count + bulk actions — fixed height to prevent layout shift */}
-      <div className="h-8 mb-1 flex items-center gap-3">
-        {selected.size > 0 && (
-          <>
-            <span className="text-xs text-accent">
-              {selected.size} audit{selected.size > 1 ? "s" : ""} selected
-            </span>
-            <button
-              onClick={() => setDeleteModalOpen(true)}
-              className="text-xs px-3 py-1 bg-danger/10 text-danger border border-danger/20 rounded-md hover:bg-danger/20 transition-colors cursor-pointer"
-            >
-              Delete Selected
-            </button>
-          </>
+        {filtersActive && (
+          <button
+            onClick={() => {
+              setSearch("");
+              setStatusFilter([]);
+              setScoreMin("");
+              setScoreMax("");
+              setPage(1);
+            }}
+            className="text-[11px] font-mono text-text-faint hover:text-danger transition-colors px-2 cursor-pointer"
+          >
+            clear ✕
+          </button>
         )}
       </div>
 
-      {/* Bulk delete confirmation modal */}
+      {/* ─── Selection bar (fixed height to avoid jump) ─── */}
+      <div className="h-9 mb-2 flex items-center gap-3">
+        {selected.size > 0 && (
+          <div className="flex items-center gap-3 rise">
+            <span className="font-mono text-[11px] tracking-wider uppercase text-accent bracketed">
+              {String(selected.size).padStart(2, "0")} selected
+            </span>
+            <button
+              onClick={() => setBulkDeleteOpen(true)}
+              className="text-xs font-medium px-3 py-1.5 bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20 rounded-sm transition-colors cursor-pointer"
+            >
+              Delete selected
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-xs text-text-faint hover:text-text cursor-pointer"
+            >
+              deselect all
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Bulk delete modal */}
       <ConfirmDeleteModal
-        open={deleteModalOpen}
-        onOpenChange={setDeleteModalOpen}
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
         title={`Delete ${selected.size} audit${selected.size > 1 ? "s" : ""}?`}
-        description="This action cannot be undone. All findings, events, and analysis data for the selected audits will be permanently deleted."
+        description="This action cannot be undone. All findings, captured events, and analysis data for the selected audits will be permanently deleted."
         confirmPhrase="DELETE"
         loading={deleting}
         onConfirm={async () => {
@@ -302,8 +381,9 @@ export default function AuditsPage() {
               body: JSON.stringify({ ids: [...selected] }),
             });
             if (res.ok) {
+              toast.success(`${selected.size} audit${selected.size > 1 ? "s" : ""} deleted`);
               setSelected(new Set());
-              setDeleteModalOpen(false);
+              setBulkDeleteOpen(false);
               fetchData();
             }
           } finally {
@@ -312,112 +392,184 @@ export default function AuditsPage() {
         }}
       />
 
-      {/* Table */}
-      <div className="border border-border rounded-lg overflow-hidden">
+      {/* Single-row delete modal */}
+      <ConfirmDeleteModal
+        open={!!rowDelete}
+        onOpenChange={(o) => !o && setRowDelete(null)}
+        title={`Delete this audit?`}
+        description={
+          rowDelete
+            ? `This will permanently delete the audit for ${rowDelete.domain}, including all findings, captured events, and analysis data.`
+            : ""
+        }
+        confirmPhrase={rowDelete?.domain ?? ""}
+        loading={deleting}
+        onConfirm={async () => {
+          if (!rowDelete) return;
+          setDeleting(true);
+          try {
+            const res = await fetch("/api/audits", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ids: [rowDelete.id] }),
+            });
+            if (res.ok) {
+              toast.success(`Deleted ${rowDelete.domain}`);
+              setRowDelete(null);
+              fetchData();
+            }
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
+
+      {/* ─── Table ─────────────────────────────── */}
+      <div className="border border-border rounded-md overflow-hidden bg-bg-elevated/40 rise" style={{ animationDelay: "0.1s" }}>
         <table className="w-full">
+          <colgroup>
+            <col className="w-10" />
+            <col />
+            <col className="w-[7.5rem]" />
+            <col className="w-[6rem]" />
+            <col className="w-[8rem] hidden md:table-column" />
+            <col className="w-[7rem]" />
+            <col className="w-[3rem]" />
+          </colgroup>
           <thead>
-            <tr className="bg-bg-elevated border-b border-border">
-              <th className="w-10 px-3 py-3">
+            <tr className="border-b border-border bg-bg-subtle/40">
+              <th className="px-3 py-3">
                 <Checkbox checked={allSelected && audits.length > 0} onCheckedChange={toggleAll} />
               </th>
               <SortableHeader field="domain" label="Domain" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
               <SortableHeader field="status" label="Status" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
-              <SortableHeader field="overallScore" label="Score" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+              <SortableHeader field="overallScore" label="Score" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} align="right" />
               <SortableHeader field="platform" label="Platform" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} className="hidden md:table-cell" />
-              <SortableHeader field="queuedAt" label="Date" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+              <SortableHeader field="queuedAt" label="Logged" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+              <th className="px-2 py-3" aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              Array.from({ length: pageSize }).map((_, i) => (
-                <tr key={i} className="border-b border-border-subtle">
-                  <td className="px-3 py-3"><div className="w-4 h-4 bg-bg-subtle rounded animate-pulse" /></td>
-                  <td className="px-4 py-3"><div className="w-32 h-4 bg-bg-subtle rounded animate-pulse" /></td>
-                  <td className="px-4 py-3"><div className="w-16 h-4 bg-bg-subtle rounded animate-pulse" /></td>
-                  <td className="px-4 py-3"><div className="w-12 h-4 bg-bg-subtle rounded animate-pulse" /></td>
-                  <td className="px-4 py-3 hidden md:table-cell"><div className="w-16 h-4 bg-bg-subtle rounded animate-pulse" /></td>
-                  <td className="px-4 py-3"><div className="w-16 h-4 bg-bg-subtle rounded animate-pulse" /></td>
-                </tr>
-              ))
+              Array.from({ length: pageSize }).map((_, i) => <SkeletonRow key={i} />)
             ) : audits.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-16">
-                  <svg className="w-10 h-10 mx-auto mb-3 text-text-faint" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
-                  <p className="text-sm text-text-muted">
-                    {debouncedSearch || statusFilter.length > 0 || scoreMin || scoreMax
-                      ? "No audits match your filters"
-                      : "No audits yet"}
-                  </p>
-                  {!debouncedSearch && statusFilter.length === 0 && (
-                    <Link href="/audits/new" className="text-xs text-accent mt-2 inline-block">
-                      Create your first audit →
+                <td colSpan={7} className="text-center py-20 px-6">
+                  <div className="inline-flex flex-col items-center">
+                    <div className="font-display text-3xl text-text-faint mb-2">
+                      {filtersActive ? "Nothing matches." : "No audits yet."}
+                    </div>
+                    <p className="text-sm text-text-muted">
+                      {filtersActive
+                        ? "Try a wider filter, or "
+                        : "The log is empty. "}
+                    </p>
+                    <Link
+                      href="/audits/new"
+                      className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-accent hover:text-accent-hover"
+                    >
+                      <span className="font-mono">+</span>
+                      Run your first audit
+                      <span className="font-mono">→</span>
                     </Link>
-                  )}
+                  </div>
                 </td>
               </tr>
             ) : (
-              audits.map((audit) => (
-                <tr key={audit.id} className="border-b border-border-subtle hover:bg-bg-subtle/50 transition-colors">
-                  <td className="px-3 py-3">
-                    <Checkbox checked={selected.has(audit.id)} onCheckedChange={() => toggleOne(audit.id)} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/audits/${audit.id}`} className="text-sm font-medium text-text hover:text-accent transition-colors">
-                      {audit.domain}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={audit.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    {audit.overallScore !== null ? (
-                      <span className={`text-sm font-semibold ${scoreColor(audit.overallGrade)}`}>
-                        {audit.overallScore}<span className="text-text-faint font-normal">/100</span>
+              audits.map((audit) => {
+                const inProgress = ["PENDING", "RUNNING", "ANALYZING", "RENDERING"].includes(audit.status);
+                const isSelected = selected.has(audit.id);
+                return (
+                  <tr
+                    key={audit.id}
+                    className={`group border-b border-border-subtle last:border-0 transition-colors ${
+                      isSelected ? "bg-accent/[0.04]" : "hover:bg-bg-subtle/40"
+                    }`}
+                  >
+                    <td className="px-3 py-3.5">
+                      <Checkbox checked={isSelected} onCheckedChange={() => toggleOne(audit.id)} />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <Link
+                        href={`/audits/${audit.id}`}
+                        className="inline-flex items-center gap-2 group/link"
+                      >
+                        <span className="text-sm font-medium text-text group-hover/link:text-accent transition-colors">
+                          {audit.domain}
+                        </span>
+                        <span className="font-mono text-[10px] text-text-faint opacity-0 group-hover/link:opacity-100 transition-opacity">
+                          →
+                        </span>
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <StatusBadge status={audit.status} />
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      {audit.overallScore !== null ? (
+                        <span className={`font-display tnum text-xl font-semibold leading-none ${scoreColor(audit.overallGrade)}`}>
+                          {audit.overallScore}
+                          <span className="text-text-faint font-normal text-[11px] ml-0.5">
+                            /100
+                          </span>
+                        </span>
+                      ) : inProgress ? (
+                        <span className="font-mono text-xs text-text-faint">…</span>
+                      ) : (
+                        <span className="font-mono text-xs text-text-faint">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5 hidden md:table-cell">
+                      <span className="text-xs text-text-muted capitalize">{audit.platform ?? "—"}</span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span
+                        className="font-mono text-[11px] text-text-faint"
+                        title={new Date(audit.queuedAt).toLocaleString()}
+                      >
+                        {relativeTime(audit.queuedAt)}
                       </span>
-                    ) : (
-                      <span className="text-xs text-text-faint">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    <span className="text-sm text-text-muted capitalize">{audit.platform ?? "—"}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-text-faint" title={new Date(audit.queuedAt).toLocaleString()}>
-                      {relativeTime(audit.queuedAt)}
-                    </span>
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td className="pr-3 py-3.5">
+                      <RowActions
+                        audit={audit}
+                        rerunning={rerunningId === audit.id}
+                        onRerun={() => handleRerun(audit)}
+                        onCopyLink={() => handleCopyLink(audit)}
+                        onDelete={() => setRowDelete(audit)}
+                      />
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Pagination */}
+      {/* ─── Pagination ─────────────────────────────── */}
       {total > 0 && (
-        <div className="flex items-center justify-between mt-4">
-          <span className="text-xs text-text-faint">
-            Showing {startItem}–{endItem} of {total}
+        <div className="flex items-center justify-between mt-5">
+          <span className="font-mono text-[11px] text-text-faint tnum">
+            Showing <span className="text-text-muted">{startItem}–{endItem}</span> of <span className="text-text-muted">{total}</span>
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setPage(Math.max(1, page - 1))}
               disabled={page <= 1}
-              className="text-xs px-3 py-1.5 border border-border rounded-md text-text-muted hover:text-text disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="text-xs px-3 py-1.5 border border-border rounded-sm text-text-muted hover:text-text hover:border-rule disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
-              Previous
+              ← Prev
             </button>
-            <span className="text-xs text-text-muted">
-              {page} / {totalPages}
+            <span className="font-mono text-[11px] text-text-muted px-3 tnum">
+              {String(page).padStart(2, "0")} / {String(totalPages).padStart(2, "0")}
             </span>
             <button
               onClick={() => setPage(Math.min(totalPages, page + 1))}
               disabled={page >= totalPages}
-              className="text-xs px-3 py-1.5 border border-border rounded-md text-text-muted hover:text-text disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="text-xs px-3 py-1.5 border border-border rounded-sm text-text-muted hover:text-text hover:border-rule disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
-              Next
+              Next →
             </button>
           </div>
         </div>
@@ -428,27 +580,145 @@ export default function AuditsPage() {
 
 // ─── Subcomponents ──────────────────────────────────────────────────
 
-function SortableHeader({
-  field, label, sortBy, sortOrder, onSort, className = "",
+function RowActions({
+  audit,
+  rerunning,
+  onRerun,
+  onCopyLink,
+  onDelete,
 }: {
-  field: string; label: string; sortBy: string; sortOrder: string;
-  onSort: (field: string) => void; className?: string;
+  audit: Audit;
+  rerunning: boolean;
+  onRerun: () => void;
+  onCopyLink: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          className="w-8 h-8 inline-flex items-center justify-center rounded-sm text-text-faint hover:text-text hover:bg-bg-subtle data-[state=open]:bg-bg-subtle data-[state=open]:text-accent transition-colors cursor-pointer"
+          aria-label={`Actions for ${audit.domain}`}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <circle cx="8" cy="3" r="1.4" />
+            <circle cx="8" cy="8" r="1.4" />
+            <circle cx="8" cy="13" r="1.4" />
+          </svg>
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={6}
+          className="z-50 min-w-[200px] bg-bg-elevated border border-border rounded-sm shadow-[0_20px_50px_-12px_rgba(0,0,0,0.6)] overflow-hidden p-1 anim-drop"
+        >
+          {/* Eyebrow */}
+          <div className="px-2.5 pt-2 pb-1.5">
+            <span className="eyebrow">Actions</span>
+          </div>
+
+          <DropdownMenu.Item asChild>
+            <Link
+              href={`/audits/${audit.id}`}
+              className="flex items-center justify-between gap-3 px-2.5 py-2 text-sm text-text hover:bg-bg-subtle hover:text-accent rounded-sm cursor-pointer outline-none data-[highlighted]:bg-bg-subtle data-[highlighted]:text-accent"
+            >
+              <span className="flex items-center gap-2.5">
+                <Glyph>↗</Glyph>
+                Open audit
+              </span>
+              <span className="font-mono text-[10px] text-text-faint">↵</span>
+            </Link>
+          </DropdownMenu.Item>
+
+          <DropdownMenu.Item asChild>
+            <a
+              href={`/audits/${audit.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between gap-3 px-2.5 py-2 text-sm text-text hover:bg-bg-subtle hover:text-accent rounded-sm cursor-pointer outline-none data-[highlighted]:bg-bg-subtle data-[highlighted]:text-accent"
+            >
+              <span className="flex items-center gap-2.5">
+                <Glyph>↑</Glyph>
+                Open in new tab
+              </span>
+              <span className="font-mono text-[10px] text-text-faint">⌘↵</span>
+            </a>
+          </DropdownMenu.Item>
+
+          <DropdownMenu.Item
+            onSelect={onCopyLink}
+            className="flex items-center justify-between gap-3 px-2.5 py-2 text-sm text-text hover:bg-bg-subtle hover:text-accent rounded-sm cursor-pointer outline-none data-[highlighted]:bg-bg-subtle data-[highlighted]:text-accent"
+          >
+            <span className="flex items-center gap-2.5">
+              <Glyph>⌘</Glyph>
+              Copy share link
+            </span>
+          </DropdownMenu.Item>
+
+          <DropdownMenu.Item
+            onSelect={(e) => { e.preventDefault(); onRerun(); }}
+            disabled={rerunning}
+            className="flex items-center justify-between gap-3 px-2.5 py-2 text-sm text-text hover:bg-bg-subtle hover:text-accent rounded-sm cursor-pointer outline-none data-[highlighted]:bg-bg-subtle data-[highlighted]:text-accent data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
+          >
+            <span className="flex items-center gap-2.5">
+              <Glyph>↻</Glyph>
+              {rerunning ? "Re-running…" : "Re-run audit"}
+            </span>
+          </DropdownMenu.Item>
+
+          <DropdownMenu.Separator className="h-px bg-border my-1" />
+
+          <DropdownMenu.Item
+            onSelect={(e) => { e.preventDefault(); onDelete(); }}
+            className="flex items-center justify-between gap-3 px-2.5 py-2 text-sm text-danger hover:bg-danger/10 rounded-sm cursor-pointer outline-none data-[highlighted]:bg-danger/10"
+          >
+            <span className="flex items-center gap-2.5">
+              <Glyph>✕</Glyph>
+              Delete
+            </span>
+            <span className="font-mono text-[10px] text-danger/60">irreversible</span>
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+function Glyph({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="font-mono text-[11px] w-3.5 inline-flex justify-center text-text-faint">
+      {children}
+    </span>
+  );
+}
+
+function SortableHeader({
+  field, label, sortBy, sortOrder, onSort, className = "", align = "left",
+}: {
+  field: string;
+  label: string;
+  sortBy: string;
+  sortOrder: string;
+  onSort: (field: string) => void;
+  className?: string;
+  align?: "left" | "right";
 }) {
   const active = sortBy === field;
   return (
     <th
       onClick={() => onSort(field)}
-      className={`text-left text-xs font-medium text-text-muted px-4 py-3 cursor-pointer hover:text-text select-none transition-colors ${className}`}
+      className={`text-${align} px-4 py-3 cursor-pointer select-none transition-colors ${className}`}
     >
-      <span className="flex items-center gap-1">
+      <span
+        className={`inline-flex items-center gap-1.5 eyebrow transition-colors ${
+          active ? "text-accent" : "hover:text-text-muted"
+        }`}
+      >
         {label}
         {active && (
-          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
-            {sortOrder === "asc" ? (
-              <path d="M6 2l4 5H2z" />
-            ) : (
-              <path d="M6 10l4-5H2z" />
-            )}
+          <svg className="w-2.5 h-2.5" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+            {sortOrder === "asc" ? <path d="M6 2l4 5H2z" /> : <path d="M6 10l4-5H2z" />}
           </svg>
         )}
       </span>
@@ -457,34 +727,40 @@ function SortableHeader({
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const inProgress = ["PENDING", "RUNNING", "ANALYZING", "RENDERING"].includes(status);
   const styles: Record<string, string> = {
-    PENDING: "bg-warning/10 text-warning border-warning/20",
-    RUNNING: "bg-info/10 text-info border-info/20",
-    ANALYZING: "bg-info/10 text-info border-info/20",
-    RENDERING: "bg-info/10 text-info border-info/20",
-    COMPLETE: "bg-success/10 text-success border-success/20",
-    FAILED: "bg-danger/10 text-danger border-danger/20",
+    PENDING: "bg-warning/[0.08] text-warning border-warning/30",
+    RUNNING: "bg-info/[0.08] text-info border-info/30",
+    ANALYZING: "bg-info/[0.08] text-info border-info/30",
+    RENDERING: "bg-info/[0.08] text-info border-info/30",
+    COMPLETE: "bg-accent/[0.08] text-accent border-accent/30",
+    FAILED: "bg-danger/[0.08] text-danger border-danger/30",
   };
   return (
-    <span className={`inline-block text-[11px] font-medium px-2 py-0.5 rounded-full border ${styles[status] ?? "bg-bg-subtle text-text-muted border-border"}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wider font-medium px-2 py-1 rounded-sm border ${
+        styles[status] ?? "bg-bg-subtle text-text-muted border-border"
+      }`}
+    >
+      {inProgress && <span className="w-1 h-1 rounded-full bg-current live-dot" />}
       {status}
     </span>
   );
 }
 
-function statusBorderActive(status: string): string {
+function statusActive(status: string): string {
   const map: Record<string, string> = {
-    PENDING: "border-warning/50 text-warning bg-warning/10",
-    RUNNING: "border-info/50 text-info bg-info/10",
-    ANALYZING: "border-info/50 text-info bg-info/10",
-    COMPLETE: "border-success/50 text-success bg-success/10",
-    FAILED: "border-danger/50 text-danger bg-danger/10",
+    PENDING: "bg-warning/15 text-warning",
+    RUNNING: "bg-info/15 text-info",
+    ANALYZING: "bg-info/15 text-info",
+    COMPLETE: "bg-accent/15 text-accent",
+    FAILED: "bg-danger/15 text-danger",
   };
-  return map[status] ?? "border-accent text-accent bg-accent/10";
+  return map[status] ?? "bg-accent/15 text-accent";
 }
 
 function scoreColor(grade: string | null): string {
-  if (grade === "pass") return "text-success";
+  if (grade === "pass") return "text-accent";
   if (grade === "evaluate") return "text-warning";
   return "text-danger";
 }
@@ -494,14 +770,28 @@ function Checkbox({ checked, onCheckedChange }: { checked: boolean; onCheckedCha
     <CheckboxPrimitive.Root
       checked={checked}
       onCheckedChange={onCheckedChange}
-      className="h-4 w-4 shrink-0 rounded border border-border bg-bg-elevated data-[state=checked]:bg-accent data-[state=checked]:border-accent transition-colors cursor-pointer flex items-center justify-center"
+      className="h-4 w-4 shrink-0 rounded-sm border border-border bg-bg-elevated data-[state=checked]:bg-accent data-[state=checked]:border-accent transition-colors cursor-pointer flex items-center justify-center hover:border-rule"
     >
       <CheckboxPrimitive.Indicator>
-        <svg className="h-3 w-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}>
+        <svg className="h-3 w-3 text-accent-ink" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}>
           <path d="M2.5 6l2.5 2.5 4.5-4.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <tr className="border-b border-border-subtle">
+      <td className="px-3 py-3.5"><div className="w-4 h-4 bg-bg-subtle rounded-sm animate-pulse" /></td>
+      <td className="px-4 py-3.5"><div className="w-32 h-3.5 bg-bg-subtle rounded-sm animate-pulse" /></td>
+      <td className="px-4 py-3.5"><div className="w-16 h-4 bg-bg-subtle rounded-sm animate-pulse" /></td>
+      <td className="px-4 py-3.5"><div className="w-12 h-4 bg-bg-subtle rounded-sm animate-pulse ml-auto" /></td>
+      <td className="px-4 py-3.5 hidden md:table-cell"><div className="w-16 h-3.5 bg-bg-subtle rounded-sm animate-pulse" /></td>
+      <td className="px-4 py-3.5"><div className="w-14 h-3.5 bg-bg-subtle rounded-sm animate-pulse" /></td>
+      <td className="pr-3 py-3.5"><div className="w-6 h-6 bg-bg-subtle rounded-sm animate-pulse ml-auto" /></td>
+    </tr>
   );
 }
 

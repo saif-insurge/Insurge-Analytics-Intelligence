@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y \
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+ENV HEADLESS=true
+ENV NODE_ENV=production
 
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
@@ -48,4 +50,8 @@ RUN pnpm --filter @ga4-audit/db generate
 RUN pnpm --filter @ga4-audit/worker build
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
 CMD ["node", "apps/worker/dist/server.js"]

@@ -471,8 +471,8 @@ async function main() {
     await runPassive();
     printResults();
   } else {
-    if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
-      console.error("❌ Phase B requires an API key. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.");
+    if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY) {
+      console.error("❌ Phase B requires an API key. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY.");
       console.error("   Or run with --passive for Phase A (no API key needed).");
       process.exit(1);
     }

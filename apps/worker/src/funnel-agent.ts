@@ -6,15 +6,18 @@
 
 import { Stagehand, tool } from "@browserbasehq/stagehand";
 import { z } from "zod";
-import { detectAnalyticsPlatforms } from "@ga4-audit/audit-core";
+import { detectAnalyticsPlatforms, isGa4Endpoint, parseGa4Request } from "@ga4-audit/audit-core";
 import type { FunnelStepLog } from "./audit-runner.js";
+import type { HarEntry } from "./har-capture.js";
+import { getStagehandModelConfig } from "./stagehand-config.js";
 
 const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel, perform interactions, and verify which GA4 events fire.
 
-You have THREE tools:
+You have FOUR tools:
 - logStep: Call after each major step to record what you did
 - getEvents: Call after interactions (like clicking Add to Cart) to check which GA4 events fired
 - checkUrl: Call after clicking a product link to verify you actually navigated to a new page
+- verifyCartChange: Call AFTER clicking Add to Cart to verify the item was actually added. Returns cart badge count and whether a cart drawer is visible. If it shows no change, your click missed — try again.
 
 ═══ YOUR MISSION ═══
 Visit every page in the funnel. On pages where product cards or add-to-cart buttons are visible, test the interaction and then call getEvents to see what fired.
@@ -45,14 +48,15 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 ═══ STEP 4: ADD TO CART ON PDP ═══
 - If there are size/color/variant selectors, pick the first available option.
 - Click the "Add to Cart" or "Add to Bag" button.
-- Wait 2-3 seconds. After clicking ATC, one of these will happen:
-  a) A cart drawer/sidebar opens showing the added item — note this as "cart drawer opened"
-  b) A notification/toast appears confirming the item was added
-  c) The cart icon badge updates with a number
-  d) Nothing visible happens — that's OK, the event may still have fired
-- Call getEvents to check if add_to_cart event fired. If no add_to_cart appears, wait 3 more seconds
-  and call getEvents again — some sites have delayed event firing through GTM.
-- Call logStep with pageName="add_to_cart"
+- IMMEDIATELY call verifyCartChange to confirm the click actually worked.
+  The tool checks for cart badge changes and cart drawer visibility.
+- If verifyCartChange shows cartChanged=false:
+  → Your click MISSED. The button may need a variant selected first, or you clicked the wrong element.
+  → Try selecting a size/color/variant first, then click ATC again, then call verifyCartChange again.
+  → Retry up to 3 times with different approaches before giving up.
+- Once verifyCartChange confirms cartChanged=true:
+  → Call getEvents with waitForNewEvents=true to check if add_to_cart event fired.
+- Call logStep with pageName="add_to_cart" — set success based on verifyCartChange, not your assumption.
 
 ═══ STEP 4B: BUY NOW TEST ON PDP ═══
 - After the ATC test, check if there is a "Buy Now", "Order Now", or "Buy It Now" button on the PDP.
@@ -60,17 +64,16 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
   a) Navigate directly to a checkout page
   b) Open a payment modal/drawer (Razorpay, Stripe, etc.)
   c) Fire begin_checkout or InitiateCheckout events
-- IMPORTANT: Wait 4-5 seconds after clicking before calling getEvents.
-  Events like begin_checkout often take a few seconds to fire because they go through
-  GTM/tag manager processing. If you check too fast, you'll miss them.
-- Call getEvents to check if begin_checkout fired in GA4 and InitiateCheckout in Meta Pixel.
+- Call getEvents with waitForNewEvents=true to check if begin_checkout fired in GA4 and
+  InitiateCheckout in Meta Pixel. The tool will automatically wait and retry for slow GTM events.
 - Note what happened in your observation.
 - If a payment modal opened, close it or press back/escape before continuing.
 - Call logStep with pageName="buy_now_test"
 
 ═══ STEP 5: VIEW CART ═══
 - If a cart drawer already opened after Step 4 (ATC), you are already viewing the cart.
-  In that case, call getEvents to check for view_cart event, note cartType="drawer", and call logStep.
+  In that case, call getEvents with waitForNewEvents=true to check for view_cart event
+  (this also catches delayed add_to_cart events from Step 4). Note cartType="drawer", and call logStep.
 - If no cart drawer opened:
   1. First, SCROLL TO THE TOP of the page so the header navigation is visible.
   2. Look for the cart element in the header. It may be labeled as:
@@ -82,7 +85,7 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 - After opening the cart (page or drawer):
   - Note cartType="page" if URL changed, cartType="drawer" if it opened on the same page
   - Cart showing 0 items is an observation, NOT a failure. Mark success=true.
-  - Call getEvents to check if view_cart event fired.
+  - Call getEvents with waitForNewEvents=true to check if view_cart event fired.
 - Call logStep with pageName="cart"
 
 ═══ STEP 6: CHECKOUT ═══
@@ -90,8 +93,8 @@ Visit every page in the funnel. On pages where product cards or add-to-cart butt
 - IMPORTANT: The checkout button is NOT the "Add to Cart" button. Look specifically for text like:
   "Checkout", "Proceed to Checkout", "Go to Checkout", "Secure Checkout", "Check Out"
 - The checkout button is typically at the BOTTOM of the cart, below the item list and total.
-- Click the checkout button. Wait 4-5 seconds for events to fire (they go through GTM processing).
-  Then call getEvents to check if begin_checkout fired.
+- Click the checkout button. Call getEvents with waitForNewEvents=true to check if begin_checkout fired.
+  The tool will automatically wait and retry for slow GTM events.
 - NOTE: begin_checkout may fire on the button CLICK itself (before any page navigation).
   After clicking checkout, ANY of these outcomes is valid — mark success=true for all:
   a) Navigated to a /checkout page with shipping/payment forms
@@ -157,18 +160,21 @@ type EventSummary = {
 export async function runFunnelAgent(
   stagehand: Stagehand,
   siteUrl: string,
-  /** Live reference to captured GA4 events. */
-  capturedEvents?: Array<{ name: string; items: unknown[]; capturedAt: string }>,
+  /** Live reference to HAR entries — parsed for GA4 events on demand. */
+  harEntries?: HarEntry[],
   /** Live reference to ALL network request URLs (for ad pixel detection). */
   allRequestUrls?: string[],
 ): Promise<{ agentResult: FunnelAgentResult | null; stepLogs: FunnelStepLog[] }> {
   const stepLogs: FunnelStepLog[] = [];
   let stepCounter = 0;
-  let lastEventCheckCount = 0;
+  let lastHarCheckIndex = 0;
   let lastUrlCheckCount = 0;
 
+  const { model, clientOptions } = getStagehandModelConfig();
+
   const agent = stagehand.agent({
-    model: process.env.STAGEHAND_MODEL || "openai/gpt-4.1-mini",
+    model: clientOptions ? { modelName: model, ...clientOptions } : model,
+    mode: "hybrid",
     systemPrompt: SYSTEM_PROMPT,
     tools: {
       logStep: tool({
@@ -202,44 +208,97 @@ export async function runFunnelAgent(
         description:
           "Check what tracking events have been captured. Returns GA4 events AND ad pixel activity " +
           "(Meta Pixel, Google Ads, TikTok, Snapchat, etc.). Call this AFTER performing an action " +
-          "to verify which platforms received the event. Focus on: GA4 events, Meta Pixel events, and Google Ads conversions.",
+          "to verify which platforms received the event. Set waitForNewEvents=true after ATC, " +
+          "Buy Now, cart open, and checkout clicks — the tool will automatically retry if no " +
+          "new events appear (GTM events can take several seconds to fire).",
         inputSchema: z.object({
           context: z.string().describe("What you just did and what you expect (e.g., 'clicked ATC, expecting add_to_cart in GA4 and AddToCart in Meta Pixel')"),
+          waitForNewEvents: z.boolean().optional().describe("If true, automatically waits and retries (up to 6s) when no new GA4 events are found. Use after ATC, Buy Now, cart open, and checkout clicks."),
         }),
         execute: async (input) => {
-          // GA4 events
-          const events = capturedEvents ?? [];
-          const newEvents = events.slice(lastEventCheckCount);
-          lastEventCheckCount = events.length;
+          const checkpointHarIndex = lastHarCheckIndex;
+          const checkpointUrlCount = lastUrlCheckCount;
 
-          const ga4Summary: Record<string, EventSummary> = {};
-          for (const e of events) {
-            if (!e.name) continue;
-            const existing = ga4Summary[e.name];
-            if (existing) {
-              existing.count++;
-              existing.latestTimestamp = e.capturedAt;
-              if (e.items.length > 0) existing.hasItems = true;
-            } else {
-              ga4Summary[e.name] = {
-                name: e.name,
-                count: 1,
-                hasItems: e.items.length > 0,
-                latestTimestamp: e.capturedAt,
-              };
+          /** Parse GA4 events from HAR entries on demand — no route interception needed. */
+          const collectResults = () => {
+            const entries = harEntries ?? [];
+            // Parse GA4 events from ALL HAR entries (cumulative)
+            const allParsed: { name: string; hasItems: boolean; timestamp: string }[] = [];
+            for (const entry of entries) {
+              if (!isGa4Endpoint(entry.url)) continue;
+              const parsed = parseGa4Request(entry.url, entry.postData);
+              for (const evt of parsed) {
+                allParsed.push({
+                  name: evt.name,
+                  hasItems: (evt.items?.length ?? 0) > 0,
+                  timestamp: entry.timestamp,
+                });
+              }
+            }
+
+            // New events = those from HAR entries added since last check
+            const newEntries = entries.slice(checkpointHarIndex);
+            const newParsed: { name: string; hasItems: boolean; timestamp: string }[] = [];
+            for (const entry of newEntries) {
+              if (!isGa4Endpoint(entry.url)) continue;
+              const parsed = parseGa4Request(entry.url, entry.postData);
+              for (const evt of parsed) {
+                newParsed.push({
+                  name: evt.name,
+                  hasItems: (evt.items?.length ?? 0) > 0,
+                  timestamp: entry.timestamp,
+                });
+              }
+            }
+            lastHarCheckIndex = entries.length;
+
+            // Build summary from all events
+            const ga4Summary: Record<string, EventSummary> = {};
+            for (const e of allParsed) {
+              if (!e.name) continue;
+              const existing = ga4Summary[e.name];
+              if (existing) {
+                existing.count++;
+                existing.latestTimestamp = e.timestamp;
+                if (e.hasItems) existing.hasItems = true;
+              } else {
+                ga4Summary[e.name] = {
+                  name: e.name,
+                  count: 1,
+                  hasItems: e.hasItems,
+                  latestTimestamp: e.timestamp,
+                };
+              }
+            }
+
+            // Ad pixels from new network requests
+            const urls = allRequestUrls ?? [];
+            const newUrls = urls.slice(checkpointUrlCount);
+            lastUrlCheckCount = urls.length;
+
+            const newPlatforms = detectAnalyticsPlatforms(newUrls);
+            const focusPlatforms = newPlatforms.filter((p) =>
+              ["Meta Pixel", "Google Ads", "TikTok Pixel", "Snapchat Pixel", "Pinterest Tag", "Twitter/X Pixel"].includes(p.name),
+            );
+
+            return { totalEvents: allParsed.length, newEvents: newParsed, ga4Summary, focusPlatforms };
+          };
+
+          let { totalEvents, newEvents, ga4Summary, focusPlatforms } = collectResults();
+
+          // Auto-retry: if waitForNewEvents is set and no new GA4 events found, wait and recheck
+          if (input.waitForNewEvents && newEvents.length === 0) {
+            for (let retry = 1; retry <= 2; retry++) {
+              console.log(`  [Events] No new events yet, waiting 3s (retry ${retry}/2)...`);
+              await new Promise((r) => setTimeout(r, 3000));
+              const retryResult = collectResults();
+              totalEvents = retryResult.totalEvents;
+              newEvents = retryResult.newEvents;
+              ga4Summary = retryResult.ga4Summary;
+              focusPlatforms = retryResult.focusPlatforms;
+              if (newEvents.length > 0) break;
             }
           }
-
-          // Ad pixels — detect from new network requests since last check
-          const urls = allRequestUrls ?? [];
-          const newUrls = urls.slice(lastUrlCheckCount);
-          lastUrlCheckCount = urls.length;
-
-          const newPlatforms = detectAnalyticsPlatforms(newUrls);
-          // Focus on the key platforms
-          const focusPlatforms = newPlatforms.filter((p) =>
-            ["Meta Pixel", "Google Ads", "TikTok Pixel", "Snapchat Pixel", "Pinterest Tag", "Twitter/X Pixel"].includes(p.name),
-          );
 
           const newGa4Names = newEvents.filter((e) => e.name).map((e) => e.name);
           const newPixelSummary = focusPlatforms.map((p) =>
@@ -252,7 +311,7 @@ export async function runFunnelAgent(
 
           return {
             ga4: {
-              totalCaptured: events.length,
+              totalCaptured: totalEvents,
               newSinceLastCheck: newEvents.length,
               newEventNames: newGa4Names,
               allEvents: Object.values(ga4Summary),
@@ -282,12 +341,89 @@ export async function runFunnelAgent(
           return { currentUrl };
         },
       }),
+      verifyCartChange: tool({
+        description:
+          "Verify that an Add to Cart click actually worked. Checks the page for concrete " +
+          "evidence: cart badge/icon count, cart drawer visibility, and cart-related text. " +
+          "Call this IMMEDIATELY after clicking ATC. If cartChanged is false, your click missed — retry.",
+        inputSchema: z.object({
+          attemptNumber: z.number().describe("Which ATC attempt this is (1, 2, or 3)"),
+        }),
+        execute: async (input) => {
+          const pg = stagehand.context.pages()[0];
+          if (!pg) return { cartChanged: false, evidence: "no page found" };
+
+          // Wait a moment for cart UI to update
+          await new Promise((r) => setTimeout(r, 2000));
+
+          // Run JS in the browser page to check for cart evidence
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const evidence = await (pg as any).evaluate(`(() => {
+            const results = [];
+
+            const badgeSelectors = [
+              '[data-cart-count]', '.cart-count', '.cart-badge', '.cart-quantity',
+              '.header-cart-count', '.cart-item-count', '.cart-number',
+              '.mini-cart-count', '.bag-count', '.basket-count',
+              '[class*="cart"] [class*="count"]', '[class*="cart"] [class*="badge"]',
+              '[class*="bag"] [class*="count"]', '[class*="bag"] [class*="badge"]',
+              '[aria-label*="cart" i] span', '[aria-label*="bag" i] span',
+            ];
+            for (const sel of badgeSelectors) {
+              const els = document.querySelectorAll(sel);
+              els.forEach(el => {
+                const text = el.textContent?.trim();
+                if (text && /^\\d+$/.test(text) && parseInt(text) > 0) {
+                  results.push('badge: "' + text + '" (' + sel + ')');
+                }
+              });
+            }
+
+            const drawerSelectors = [
+              '[class*="cart-drawer"]', '[class*="cart-sidebar"]', '[class*="cart-slide"]',
+              '[class*="mini-cart"]', '[class*="minicart"]', '[class*="side-cart"]',
+              '[class*="drawer"][class*="cart"]', '[class*="drawer"][class*="open"]',
+              '[id*="cart-drawer"]', '[id*="mini-cart"]', '[id*="minicart"]',
+              '[data-cart-drawer]', '[data-mini-cart]',
+            ];
+            for (const sel of drawerSelectors) {
+              const els = document.querySelectorAll(sel);
+              els.forEach(el => {
+                const style = window.getComputedStyle(el);
+                const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity) > 0;
+                if (isVisible && el.offsetHeight > 50) {
+                  results.push('drawer visible (' + sel + ')');
+                }
+              });
+            }
+
+            const bodyText = document.body.innerText.toLowerCase();
+            const confirmPhrases = ['added to cart', 'added to bag', 'item added', 'added to basket', 'added successfully'];
+            for (const phrase of confirmPhrases) {
+              if (bodyText.includes(phrase)) {
+                results.push('confirmation text: "' + phrase + '"');
+              }
+            }
+
+            return results;
+          })()`) as string[];
+
+          const cartChanged = evidence.length > 0;
+          const summary = cartChanged ? evidence.join('; ') : 'no cart change detected';
+
+          console.log(`  [Cart Verify] Attempt ${input.attemptNumber}: ${cartChanged ? '✓' : '✗'} — ${summary}`);
+
+          return { cartChanged, evidence: summary, attemptNumber: input.attemptNumber };
+        },
+      }),
     },
   });
 
   const page = stagehand.context.pages()[0]!;
   await page.goto(siteUrl, { waitUntil: "networkidle", timeoutMs: 30000 }).catch(() => {});
-  await page.waitForTimeout(2000);
+  // Give Web Pixels sandbox iframe + GTM time to bootstrap and fire initial events.
+  // Shopify Web Pixels in particular needs ~5-8s before view_item/page_view fire from sandbox.
+  await page.waitForTimeout(5000);
 
   try {
     const result = await agent.execute({
@@ -296,11 +432,11 @@ export async function runFunnelAgent(
         `1. HOME PAGE — observe the homepage (you're already here). Call logStep.\n` +
         `2. CATEGORY PAGE — navigate to a product listing via the top nav. Call logStep.\n` +
         `3. PRODUCT PAGE — click a product name/image to visit the PDP. Call logStep.\n` +
-        `4. ADD TO CART — select a variant if needed, click ATC, call getEvents. Call logStep.\n` +
-        `4B. BUY NOW TEST — if a "Buy Now" button exists on PDP, click it, call getEvents, then go back. Call logStep.\n` +
-        `5. VIEW CART — if cart drawer opened after ATC use that, otherwise click cart icon. Call getEvents. Call logStep.\n` +
-        `6. CHECKOUT — from cart, click Checkout button (NOT ATC), call getEvents. Call logStep.\n\n` +
-        `Call logStep after each step. Call getEvents after every interaction (ATC, Buy Now, cart open, checkout).\n` +
+        `4. ADD TO CART — select a variant if needed, click ATC, call getEvents(waitForNewEvents=true). Call logStep.\n` +
+        `4B. BUY NOW TEST — if a "Buy Now" button exists on PDP, click it, call getEvents(waitForNewEvents=true), then go back. Call logStep.\n` +
+        `5. VIEW CART — if cart drawer opened after ATC use that, otherwise click cart icon. Call getEvents(waitForNewEvents=true). Call logStep.\n` +
+        `6. CHECKOUT — from cart, click Checkout button (NOT ATC), call getEvents(waitForNewEvents=true). Call logStep.\n\n` +
+        `Call logStep after each step. Call getEvents(waitForNewEvents=true) after every interaction (ATC, Buy Now, cart open, checkout).\n` +
         `Do NOT stop early. If a step fails, try another approach.\n` +
         `NEVER click Place Order or Pay Now — STOP at the checkout page.`,
       maxSteps: 45,

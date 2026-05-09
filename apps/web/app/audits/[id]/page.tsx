@@ -153,30 +153,65 @@ export default function AuditDetailPage() {
   }
 
   return (
-    <main className="content-container py-10">
+    <main className="content-container py-12">
       {/* Back link */}
-      <Link href="/audits" className="text-sm text-text-faint hover:text-text-muted transition-colors">
-        ← Back to audits
+      <Link
+        href="/audits"
+        className="inline-flex items-center gap-2 font-mono text-[11px] text-text-faint hover:text-accent transition-colors"
+      >
+        ← Back to log
       </Link>
 
-      {/* Header */}
-      <div className="mt-4 mb-8 flex items-start justify-between">
-        <div>
-          <h1 className="font-display text-2xl font-bold">{audit.domain}</h1>
-          <p className="text-sm text-text-muted mt-1">
-            {audit.url} · {audit.platform ?? "custom"} · {new Date(audit.queuedAt).toLocaleDateString()}
-          </p>
+      {/* Editorial header */}
+      <header className="mt-6 mb-10 rise">
+        <div className="flex items-baseline justify-between gap-6 mb-1">
+          <span className="eyebrow">
+            / Record · {new Date(audit.queuedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+          </span>
+          <span className="eyebrow tnum">ID·{audit.id.slice(-8)}</span>
         </div>
+        <div className="hairline mb-6" />
 
-        {audit.overallScore !== null && (
-          <div className="text-right">
-            <div className={`text-4xl font-display font-bold ${gradeColor(audit.overallGrade)}`}>
-              {audit.overallScore}
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <div className="min-w-0 flex-1">
+            <h1 className="font-display text-[3.25rem] leading-[0.95] font-semibold tracking-[-0.03em] truncate">
+              {audit.domain}
+              <span className="text-accent">.</span>
+            </h1>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-3 text-xs">
+              <a
+                href={audit.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-text-muted hover:text-accent transition-colors inline-flex items-center gap-1"
+              >
+                {audit.url}
+                <span className="text-[10px]">↗</span>
+              </a>
+              {audit.platform && (
+                <span className="font-mono text-text-faint">
+                  · platform <span className="text-text-muted capitalize">{audit.platform}</span>
+                </span>
+              )}
+              <span className="font-mono text-text-faint">
+                · {new Date(audit.queuedAt).toLocaleString()}
+              </span>
             </div>
-            <div className="text-xs text-text-muted">/100 · {audit.overallGrade}</div>
           </div>
-        )}
-      </div>
+
+          {audit.overallScore !== null && (
+            <div className="text-right shrink-0">
+              <span className="eyebrow">Overall</span>
+              <div className={`font-display tnum text-[5rem] leading-none font-semibold ${gradeColor(audit.overallGrade)} mt-1`}>
+                {audit.overallScore}
+              </div>
+              <div className="font-mono text-[10px] text-text-faint mt-1 tracking-wider uppercase">
+                /100 · {audit.overallGrade}
+              </div>
+            </div>
+          )}
+        </div>
+      </header>
 
       {/* In-progress state */}
       {isInProgress && <InProgressBanner status={audit.status} />}
@@ -193,39 +228,57 @@ export default function AuditDetailPage() {
       {audit.status === "COMPLETE" && (
         <>
           {/* Category scores */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-            {Object.entries(CATEGORY_LABELS).map(([key, { label, maxScore }]) => {
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-8">
+            {Object.entries(CATEGORY_LABELS).map(([key, { label, maxScore }], idx) => {
               const catFindings = audit.findings.filter((f) => f.category === key);
               const failures = catFindings.filter((f) => f.status === "fail").length;
               return (
-                <div key={key} className="glass rounded-lg p-4">
-                  <div className="text-xs text-text-muted mb-2">{label}</div>
-                  <div className="text-lg font-semibold">
+                <div key={key} className="border border-border rounded-md bg-bg-elevated/40 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-mono text-[10px] tracking-wider text-text-faint uppercase">
+                      §{String(idx + 1).padStart(2, "0")}
+                    </span>
+                    <span className="font-mono text-[10px] text-text-faint tnum">/{maxScore}</span>
+                  </div>
+                  <div className="text-[11px] text-text-muted mb-1.5">{label}</div>
+                  <div className="font-display text-lg font-semibold leading-tight">
                     {failures === 0 ? (
-                      <span className="text-success">All clear</span>
+                      <span className="text-accent">All clear</span>
                     ) : (
-                      <span className="text-danger">{failures} issue{failures > 1 ? "s" : ""}</span>
+                      <span className="text-danger">
+                        {failures}<span className="font-normal text-text-muted text-sm ml-1">issue{failures > 1 ? "s" : ""}</span>
+                      </span>
                     )}
                   </div>
-                  <div className="text-xs text-text-faint mt-1">/{maxScore} pts</div>
                 </div>
               );
             })}
           </div>
 
           {/* Actions */}
-          <div className="mb-8 flex items-center gap-3">
+          <div className="mb-10 flex items-center gap-2 flex-wrap">
             <a
               href={`/api/audits/${audit.id}/pdf`}
-              className="text-sm px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-md transition-colors"
+              className="text-sm font-medium px-4 py-2 bg-accent hover:bg-accent-hover text-accent-ink rounded-sm transition-all hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_rgba(212,255,58,0.5)] inline-flex items-center gap-2"
             >
+              <span className="font-mono text-xs">↓</span>
               Download PDF
             </a>
             <button
               onClick={copyShareLink}
-              className="text-sm px-4 py-2 bg-bg-elevated border border-border hover:border-accent/50 rounded-md transition-colors cursor-pointer"
+              className="text-sm px-4 py-2 bg-bg-elevated border border-border hover:border-accent/50 hover:text-accent rounded-sm transition-colors cursor-pointer inline-flex items-center gap-2"
             >
-              {copied ? "✓ Copied!" : "Copy Share Link"}
+              {copied ? (
+                <>
+                  <span className="text-accent">✓</span>
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <span className="font-mono text-xs">⌘</span>
+                  Copy Share Link
+                </>
+              )}
             </button>
             <button
               onClick={async () => {
@@ -243,16 +296,18 @@ export default function AuditDetailPage() {
                 }
               }}
               disabled={rerunning}
-              className="text-sm px-4 py-2 bg-bg-elevated border border-border hover:border-accent/50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+              className="text-sm px-4 py-2 bg-bg-elevated border border-border hover:border-accent/50 hover:text-accent rounded-sm transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-2"
             >
-              {rerunning ? "Re-running..." : "Re-run Audit"}
+              <span className="font-mono text-xs">↻</span>
+              {rerunning ? "Re-running…" : "Re-run Audit"}
             </button>
             <div className="flex-1" />
             <button
               onClick={() => setDeleteModalOpen(true)}
-              className="text-xs px-3 py-2 text-danger/70 hover:text-danger hover:bg-danger/10 border border-transparent hover:border-danger/20 rounded-md transition-colors cursor-pointer"
+              className="text-xs px-3 py-2 text-text-faint hover:text-danger hover:bg-danger/[0.07] border border-transparent hover:border-danger/30 rounded-sm transition-colors cursor-pointer inline-flex items-center gap-1.5"
             >
-              Delete Audit
+              <span className="font-mono">✕</span>
+              Delete
             </button>
           </div>
 
@@ -526,20 +581,18 @@ function EcommerceEventsSection({ events }: { events: CapturedEvent[] }) {
             return (
               <div
                 key={funnelEvent.name}
-                className={`flex items-center gap-2 p-2 rounded-md ${found ? "bg-success/5 border border-success/20" : "bg-bg-subtle border border-border-subtle"}`}
+                className={`flex items-center gap-2 p-2.5 rounded-md border ${found ? "bg-success/5 border-success/20" : "bg-danger/5 border-danger/20"}`}
               >
-                <span className={found ? "text-success" : "text-text-faint"}>
+                <span className={`text-base ${found ? "text-success" : "text-danger"}`}>
                   {found ? "✓" : "✗"}
                 </span>
                 <div>
-                  <div className={`text-xs font-medium ${found ? "text-text" : "text-text-faint"}`}>
+                  <div className={`text-xs font-medium ${found ? "text-text" : "text-danger"}`}>
                     {funnelEvent.name}
                   </div>
-                  {found && (
-                    <div className="text-[10px] text-text-muted">
-                      {captured!.length}x · {itemCount} items
-                    </div>
-                  )}
+                  <div className={`text-[10px] ${found ? "text-success" : "text-danger/70"}`}>
+                    {found ? `${captured!.length}x · ${itemCount} items` : "Not Detected"}
+                  </div>
                 </div>
               </div>
             );

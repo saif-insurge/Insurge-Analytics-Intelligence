@@ -7,3 +7,12 @@ dist/
 *.tsbuildinfo
 .vercel
 .DS_Store
+
+# Local agent / tool artifacts
+.codex/
+.playwright-mcp/
+.claude/
+
+# Design references / local screenshots — kept local, not in repo
+# (assets that should be tracked live under apps/web/public or packages/pdf/assets)
+signin-new-design.png
