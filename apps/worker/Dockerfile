@@ -1,55 +1,46 @@
-FROM node:22-slim
+# Microsoft's official Playwright base image — comes with the matching Chromium
+# pre-installed at the path Playwright expects. This is what production browser
+# automation services (Browserless, etc.) use on Cloud Run.
+#
+# Why we switched: Debian's `chromium` package hangs silently on Cloud Run gen2.
+# `chromium --version` would time out with no stderr. The Playwright-bundled
+# Chromium just works.
+FROM mcr.microsoft.com/playwright:v1.59.1-noble
 
-# Install Chromium dependencies for Playwright/Stagehand,
-# OpenSSL for Prisma, and CA certs for outbound HTTPS.
-RUN apt-get update && apt-get install -y \
-    chromium \
-    fonts-liberation \
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
+# Install OpenSSL for Prisma + ca-certificates for outbound HTTPS.
+# Most Chromium deps are already in the base image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 ENV HEADLESS=true
 ENV NODE_ENV=production
 
-# Install pnpm
+# pnpm via corepack (Node is pre-installed in the Playwright image).
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 WORKDIR /app
 
-# Copy workspace config and lockfile
+# Copy workspace config + lockfile first for caching.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY turbo.json ./
 
-# Copy all package.json files for dependency resolution
+# Copy package.json for each workspace package so pnpm can resolve the graph.
 COPY packages/tsconfig/package.json ./packages/tsconfig/
 COPY packages/db/package.json ./packages/db/
 COPY packages/audit-core/package.json ./packages/audit-core/
 COPY apps/worker/package.json ./apps/worker/
 
-# Install dependencies
 RUN pnpm install --frozen-lockfile
 
-# Copy source
+# Copy source for the worker and its workspace dependencies.
 COPY packages/tsconfig/ ./packages/tsconfig/
 COPY packages/db/ ./packages/db/
 COPY packages/audit-core/ ./packages/audit-core/
 COPY apps/worker/ ./apps/worker/
 
-# Generate Prisma client, then build worker + all its workspace dependencies (audit-core, db).
-# Turbo respects the dependency graph and builds packages in the right order.
+# Generate Prisma client, then build worker + transitive workspace deps via turbo.
 RUN pnpm --filter @ga4-audit/db generate
 RUN pnpm exec turbo run build --filter=@ga4-audit/worker
 
