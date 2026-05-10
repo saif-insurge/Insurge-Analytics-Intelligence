@@ -79,6 +79,46 @@ export async function runAuditPipeline(
   const headless = process.env.HEADLESS !== "false";
   console.log(`Browser config: model=${stagehandConfig.model}, provider=${stagehandConfig.provider}, headless=${headless} (HEADLESS env="${process.env.HEADLESS ?? "unset"}")`);
 
+  // ─── 1a. Diagnostic: verify Chromium can launch standalone ────────
+  // Captures stderr that Stagehand swallows. Remove once stable.
+  if (process.env.CHROMIUM_DIAG === "true") {
+    const { spawn } = await import("node:child_process");
+    const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || "/usr/bin/chromium";
+    console.log(`[Diag] Chromium binary: ${chromiumPath}`);
+
+    const versionRes = await new Promise<string>((resolve) => {
+      let buf = "";
+      const proc = spawn(chromiumPath, ["--version", "--no-sandbox"], { stdio: ["ignore", "pipe", "pipe"] });
+      proc.stdout.on("data", (d) => (buf += d.toString()));
+      proc.stderr.on("data", (d) => (buf += d.toString()));
+      proc.on("close", (code) => resolve(`exit=${code} | ${buf.trim() || "(no output)"}`));
+      proc.on("error", (err) => resolve(`spawn-error: ${err.message}`));
+      setTimeout(() => { proc.kill("SIGKILL"); resolve(`timeout(10s) | ${buf.trim() || "(no output)"}`); }, 10000);
+    });
+    console.log(`[Diag] chromium --version: ${versionRes.slice(0, 800)}`);
+
+    // Try a real headless launch with the same args Stagehand uses, capture stderr
+    const launchRes = await new Promise<string>((resolve) => {
+      let buf = "";
+      const proc = spawn(chromiumPath, [
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--remote-debugging-port=9222",
+        "about:blank",
+      ], { stdio: ["ignore", "pipe", "pipe"] });
+      proc.stdout.on("data", (d) => (buf += d.toString()));
+      proc.stderr.on("data", (d) => (buf += d.toString()));
+      proc.on("close", (code) => resolve(`exit=${code} | ${buf.trim() || "(no output)"}`));
+      proc.on("error", (err) => resolve(`spawn-error: ${err.message}`));
+      // Give it 8s to start, then kill and report what we got
+      setTimeout(() => { proc.kill("SIGKILL"); resolve(`killed-after-8s | ${buf.trim() || "(no output)"}`); }, 8000);
+    });
+    console.log(`[Diag] chromium headless launch: ${launchRes.slice(0, 1500)}`);
+  }
+
   const stagehand = new Stagehand({
     env: "LOCAL",
     model: stagehandConfig.clientOptions
