@@ -1,6 +1,7 @@
 FROM node:22-slim
 
-# Install Chromium dependencies for Playwright/Stagehand
+# Install Chromium dependencies for Playwright/Stagehand,
+# OpenSSL for Prisma, and CA certs for outbound HTTPS.
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -14,6 +15,8 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libgbm1 \
     libasound2 \
+    openssl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
