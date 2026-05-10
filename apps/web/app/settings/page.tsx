@@ -40,8 +40,24 @@ export default function SettingsPage() {
         </p>
       </header>
 
+      {/* API Keys */}
+      <Section number="01" title="API Keys" subtitle="Submit audits programmatically from external tools">
+        <Link
+          href="/settings/api-keys"
+          className="block border border-border rounded-md bg-bg-elevated/40 p-5 hover:border-accent/40 transition-colors group"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-medium text-sm">Manage API Keys</div>
+              <p className="text-xs text-text-muted mt-1">Create, view, and revoke keys for the audit submission API.</p>
+            </div>
+            <span className="text-text-faint group-hover:text-accent transition-colors">→</span>
+          </div>
+        </Link>
+      </Section>
+
       {/* AI Model Configuration */}
-      <Section number="01" title="Model Configuration">
+      <Section number="02" title="Model Configuration">
         <div className="border border-border rounded-md bg-bg-elevated/40 p-5">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <ConfigCell label="Model" value="gpt-5.4" mono />
@@ -55,7 +71,7 @@ export default function SettingsPage() {
       </Section>
 
       {/* Cost Overview */}
-      <Section number="02" title="Inference Ledger" subtitle="Cumulative AI spend across all audits">
+      <Section number="03" title="Inference Ledger" subtitle="Cumulative AI spend across all audits">
         {loading ? (
           <div className="border border-border rounded-md bg-bg-elevated/40 p-12 text-center text-text-muted text-sm">
             <div className="animate-pulse font-mono text-[11px] tracking-wider uppercase">

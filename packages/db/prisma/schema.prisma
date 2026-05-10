@@ -11,6 +11,7 @@ model Organization {
   name      String
   createdAt DateTime @default(now())
   audits    Audit[]
+  apiKeys   ApiKey[]
 }
 
 model User {
@@ -88,4 +89,22 @@ model Finding {
   fix      Json?
 
   @@index([auditId])
+}
+
+model ApiKey {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdById    String
+
+  name           String
+  prefix         String
+  keyHash        String        @unique
+
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId])
+  @@index([keyHash])
 }

@@ -6,16 +6,15 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$SHORT_SHA'
+      - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID'
       - '-t'
       - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:latest'
       - '-f'
       - 'apps/worker/Dockerfile'
       - '.'
 images:
-  - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$SHORT_SHA'
+  - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID'
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:latest'
 options:
-  machineType: 'E2_HIGHCPU_8'
   logging: CLOUD_LOGGING_ONLY
-timeout: '1200s'
+timeout: '1800s'

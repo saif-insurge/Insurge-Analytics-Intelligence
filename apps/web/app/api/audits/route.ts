@@ -1,20 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { Client } from "@upstash/qstash";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-
-const CreateSingleAuditSchema = z.object({
-  url: z.string().url().startsWith("http"),
-  notes: z.string().optional(),
-  notifyEmail: z.string().email().optional(),
-});
-
-const CreateBulkAuditSchema = z.object({
-  urls: z.array(z.string().url().startsWith("http")).min(1).max(100),
-  notes: z.string().optional(),
-  notifyEmail: z.string().email().optional(),
-});
+import { CreateSingleAuditSchema, CreateBulkAuditSchema } from "@/lib/audit-schemas";
+import { createAudit, ensureOrgAndUser } from "@/lib/audit-submit";
 
 /** POST /api/audits — create single or bulk audits and enqueue to worker. */
 export async function POST(req: Request) {
@@ -44,50 +33,12 @@ export async function POST(req: Request) {
     const notes: string | undefined = isBulk ? bulkParsed!.data!.notes : singleParsed!.data!.notes;
     const notifyEmail: string | undefined = isBulk ? bulkParsed!.data!.notifyEmail : singleParsed!.data!.notifyEmail;
 
-    // Ensure org and user exist
-    await prisma.organization.upsert({
-      where: { id: organizationId },
-      update: {},
-      create: { id: organizationId, name: "Default" },
-    });
-    await prisma.user.upsert({
-      where: { id: userId },
-      update: {},
-      create: { id: userId, email: userId, organizationId },
-    });
+    await ensureOrgAndUser({ organizationId, userId });
 
-    const workerUrl = process.env.WORKER_BASE_URL;
     const auditIds: string[] = [];
-
     for (const url of urls) {
-      const domain = new URL(url).hostname;
-
-      const audit = await prisma.audit.create({
-        data: {
-          organizationId,
-          createdById: userId,
-          url,
-          domain,
-          status: "PENDING",
-          operatorNotes: notes ?? "",
-        },
-      });
-      auditIds.push(audit.id);
-
-      // Enqueue to QStash (or call worker directly in dev)
-      if (process.env.QSTASH_TOKEN && workerUrl) {
-        const qstash = new Client({ token: process.env.QSTASH_TOKEN });
-        await qstash.publishJSON({
-          url: `${workerUrl}/audit`,
-          body: { auditId: audit.id, notifyEmail },
-        });
-      } else if (workerUrl) {
-        fetch(`${workerUrl}/audit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ auditId: audit.id, notifyEmail }),
-        }).catch(() => {});
-      }
+      const { auditId } = await createAudit({ organizationId, userId, url, notes, notifyEmail });
+      auditIds.push(auditId);
     }
 
     return NextResponse.json(
