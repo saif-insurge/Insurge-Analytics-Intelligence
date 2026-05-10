@@ -15,10 +15,17 @@ steps:
       - 'apps/worker/Dockerfile'
       - '.'
 
-  # 2. Roll the new image out to Cloud Run as a new revision.
-  # The `images:` block below pushes both tags to Artifact Registry first.
-  # Without this deploy step, the registry gets the new image but Cloud Run
-  # keeps serving the previously-pinned image hash forever.
+  # 2. Push BOTH tags explicitly. The `images:` block at the bottom of this
+  # file would push at the END of the build, but our deploy step needs the
+  # image in the registry RIGHT NOW.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-build-id
+    args: ['push', 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID']
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push-latest
+    args: ['push', 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:latest']
+
+  # 3. Roll the new image out to Cloud Run as a new revision.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: deploy
     entrypoint: 'gcloud'
@@ -29,8 +36,8 @@ steps:
       - '--region=europe-west1'
       - '--image=europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID'
 
-# Cloud Build pushes these tags to Artifact Registry between the build step
-# and any subsequent steps that depend on them.
+# Declared for Cloud Build UI to show "this build produced these images".
+# Already pushed in step 2 above; this is a no-op verify.
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID'
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:latest'
