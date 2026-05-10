@@ -1,8 +1,10 @@
 # Cloud Build config for the worker container.
-# Usage:
+# Triggered automatically by GitHub push to main; can also be run manually:
 #   gcloud builds submit --config=cloudbuild.worker.yaml --region=europe-west1
 steps:
+  # 1. Build and tag the image
   - name: 'gcr.io/cloud-builders/docker'
+    id: build
     args:
       - 'build'
       - '-t'
@@ -12,9 +14,27 @@ steps:
       - '-f'
       - 'apps/worker/Dockerfile'
       - '.'
+
+  # 2. Roll the new image out to Cloud Run as a new revision.
+  # The `images:` block below pushes both tags to Artifact Registry first.
+  # Without this deploy step, the registry gets the new image but Cloud Run
+  # keeps serving the previously-pinned image hash forever.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: deploy
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'worker'
+      - '--region=europe-west1'
+      - '--image=europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID'
+
+# Cloud Build pushes these tags to Artifact Registry between the build step
+# and any subsequent steps that depend on them.
 images:
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID'
   - 'europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:latest'
+
 options:
   logging: CLOUD_LOGGING_ONLY
 timeout: '1800s'
