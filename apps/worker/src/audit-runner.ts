@@ -134,6 +134,10 @@ export async function runAuditPipeline(
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
+        // Force CDP to bind on IPv4 loopback. Cloud Run gen2 default networking
+        // can leave Chromium binding only to IPv6 (::1), causing ECONNREFUSED
+        // when Stagehand connects to ws://127.0.0.1:PORT. (Playwright #21022)
+        "--remote-debugging-address=127.0.0.1",
         // Stealth — hides Chrome's automation flags from JS detection
         "--disable-blink-features=AutomationControlled",
         "--disable-features=IsolateOrigins,site-per-process",
