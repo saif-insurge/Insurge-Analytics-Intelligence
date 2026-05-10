@@ -7,11 +7,15 @@
 # Chromium just works.
 FROM mcr.microsoft.com/playwright:v1.59.1-noble
 
-# Install OpenSSL for Prisma + ca-certificates for outbound HTTPS.
-# Most Chromium deps are already in the base image.
+# Install OpenSSL for Prisma, CA certs for outbound HTTPS, and tini.
+# tini is a tiny init system that reaps zombie children. Required because
+# Node would otherwise run as PID 1 and Chromium's child processes (renderer,
+# GPU, sandbox helpers) would accumulate as zombies — causing subsequent
+# Chromium launches to hang silently after the first one.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 ENV HEADLESS=true
@@ -62,4 +66,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "require('http').get('http://localhost:'+(process.env.PORT||8080)+'/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
+# tini reaps zombies; -g forwards signals to the whole process group so
+# Chromium children get cleaned up properly when the worker exits.
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
 CMD ["sh", "-c", "export CHROME_PATH=$(cat /etc/chrome-path) && echo \"Starting worker with CHROME_PATH=$CHROME_PATH\" && exec node apps/worker/dist/server.js"]
