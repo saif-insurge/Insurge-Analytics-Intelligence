@@ -131,6 +131,29 @@ export async function runAuditPipeline(
       }, 5000);
     });
     console.log(`[Diag] chromium CDP probe: ${launchProbe}`);
+
+    // Test 3: Bypass Stagehand and use Playwright directly. If Playwright can
+    // launch the same Chromium successfully, the problem is in Stagehand's
+    // launch path. If Playwright also fails, it's a Chromium/Cloud Run issue.
+    try {
+      const pw = await import("playwright-core");
+      const browser = await pw.chromium.launch({
+        headless: true,
+        executablePath: chromiumPath,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        timeout: 15000,
+      });
+      const v = await browser.version();
+      const ctx = await browser.newContext();
+      const page = await ctx.newPage();
+      await page.goto("about:blank", { timeout: 5000 });
+      await browser.close();
+      console.log(`[Diag] Playwright direct launch: SUCCESS version=${v}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? err.stack?.split("\n").slice(0, 5).join(" | ") : "";
+      console.log(`[Diag] Playwright direct launch FAILED: ${msg.slice(0, 600)} | stack: ${stack?.slice(0, 400)}`);
+    }
   }
 
   const stagehand = new Stagehand({
