@@ -79,6 +79,20 @@ function detectTransport(url: string): CapturedEvent["transport"] {
 }
 
 /**
+ * URL-decodes a string but never throws — falls back to the raw input if
+ * the input has invalid percent-encoding. Real-world GA4 payloads sometimes
+ * contain malformed escapes (e.g. unescaped `%` characters in product names),
+ * and we don't want a single bad item to crash the whole audit pipeline.
+ */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
  * Parses a single tilde-separated item string (e.g. "id12345~nmBlue+Widget~pr49.99~qt1").
  * Handles nested categories (ca2, ca3, etc.) and numeric coercion for price/quantity/index.
  */
@@ -93,7 +107,7 @@ function parseSingleItem(encoded: string): Record<string, unknown> {
     const threeCharPrefix = segment.slice(0, 3);
     const threeCharMatch = /^ca([2-5])$/.exec(threeCharPrefix);
     if (threeCharMatch) {
-      const value = decodeURIComponent(segment.slice(3).replace(/\+/g, " "));
+      const value = safeDecode(segment.slice(3).replace(/\+/g, " "));
       item[`item_category${threeCharMatch[1]}`] = value;
       continue;
     }
@@ -102,15 +116,13 @@ function parseSingleItem(encoded: string): Record<string, unknown> {
     const prefix = segment.slice(0, 2);
     const fieldName = ITEM_PREFIX_MAP[prefix];
     if (fieldName) {
-      const rawValue = decodeURIComponent(
-        segment.slice(2).replace(/\+/g, " "),
-      );
+      const rawValue = safeDecode(segment.slice(2).replace(/\+/g, " "));
       item[fieldName] = coerceNumeric(prefix, rawValue);
       continue;
     }
 
     // Unknown prefix — store raw with the prefix as key
-    item[prefix] = decodeURIComponent(segment.slice(2).replace(/\+/g, " "));
+    item[prefix] = safeDecode(segment.slice(2).replace(/\+/g, " "));
   }
 
   return item;

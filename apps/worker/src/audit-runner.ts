@@ -253,18 +253,26 @@ export async function runAuditPipeline(
 
   // Parse all GA4 events from the complete HAR — deterministic, no race conditions
   const capturedEvents: (ParsedGa4Event & { capturedAt: string; funnelStep: string })[] = [];
+  let parseErrors = 0;
   for (const entry of har.entries) {
     if (!isGa4Endpoint(entry.url)) continue;
-    const parsed = parseGa4Request(entry.url, entry.postData);
-    for (const evt of parsed) {
-      capturedEvents.push({
-        ...evt,
-        capturedAt: entry.timestamp,
-        funnelStep: "unknown", // HAR doesn't track funnel step context
-      });
+    try {
+      const parsed = parseGa4Request(entry.url, entry.postData);
+      for (const evt of parsed) {
+        capturedEvents.push({
+          ...evt,
+          capturedAt: entry.timestamp,
+          funnelStep: "unknown", // HAR doesn't track funnel step context
+        });
+      }
+    } catch (err) {
+      // Don't let one malformed event kill the whole audit — log and skip
+      parseErrors++;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[ga4-parse] skipped malformed event from ${entry.url.slice(0, 100)}: ${msg}`);
     }
   }
-  console.log(`Parsed ${capturedEvents.length} GA4 events from ${har.entries.length} HAR entries`);
+  console.log(`Parsed ${capturedEvents.length} GA4 events from ${har.entries.length} HAR entries${parseErrors ? ` (${parseErrors} skipped due to parse errors)` : ""}`);
 
   // Diagnostic: how many HAR entries hit GA4-shaped URLs (helps tell if events were missed by capture vs parser)
   const ga4UrlCount = har.entries.filter((e) => isGa4Endpoint(e.url)).length;

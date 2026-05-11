@@ -222,12 +222,18 @@ export async function runFunnelAgent(
           /** Parse GA4 events from HAR entries on demand — no route interception needed. */
           const collectResults = () => {
             const entries = harEntries ?? [];
+            // Helper that swallows malformed-payload errors from a single entry
+            // so the whole agent doesn't see "URI malformed" instead of events.
+            const safeParse = (entry: HarEntry) => {
+              try { return parseGa4Request(entry.url, entry.postData); }
+              catch { return []; }
+            };
+
             // Parse GA4 events from ALL HAR entries (cumulative)
             const allParsed: { name: string; hasItems: boolean; timestamp: string }[] = [];
             for (const entry of entries) {
               if (!isGa4Endpoint(entry.url)) continue;
-              const parsed = parseGa4Request(entry.url, entry.postData);
-              for (const evt of parsed) {
+              for (const evt of safeParse(entry)) {
                 allParsed.push({
                   name: evt.name,
                   hasItems: (evt.items?.length ?? 0) > 0,
@@ -241,8 +247,7 @@ export async function runFunnelAgent(
             const newParsed: { name: string; hasItems: boolean; timestamp: string }[] = [];
             for (const entry of newEntries) {
               if (!isGa4Endpoint(entry.url)) continue;
-              const parsed = parseGa4Request(entry.url, entry.postData);
-              for (const evt of parsed) {
+              for (const evt of safeParse(entry)) {
                 newParsed.push({
                   name: evt.name,
                   hasItems: (evt.items?.length ?? 0) > 0,
