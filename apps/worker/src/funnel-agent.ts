@@ -10,6 +10,7 @@ import { detectAnalyticsPlatforms, isGa4Endpoint, parseGa4Request } from "@ga4-a
 import type { FunnelStepLog } from "./audit-runner.js";
 import type { HarEntry } from "./har-capture.js";
 import { getStagehandModelConfig } from "./stagehand-config.js";
+import { detectAiProviderError } from "./errors.js";
 
 const SYSTEM_PROMPT = `You are an ecommerce GA4 tracking auditor. Your job is to walk through an ecommerce website's shopping funnel, perform interactions, and verify which GA4 events fire.
 
@@ -453,7 +454,16 @@ export async function runFunnelAgent(
       stepLogs,
     };
   } catch (err) {
-    console.error("Agent execution failed:", err);
+    // AI provider failures (billing cap, quota, auth, rate limit) short-circuit
+    // the whole audit so we don't silently return "no GA4 detected" when really
+    // the funnel walk never ran. Surface a friendly reason in the UI.
+    const aiErr = detectAiProviderError(err);
+    if (aiErr) throw aiErr;
+
+    // Non-AI failures (site refused bot, navigation timeout, etc.) keep
+    // current degraded-completion behavior — the audit still produces a low
+    // score but at least lands as COMPLETE.
+    console.error("Agent execution failed (non-AI):", err);
     return {
       agentResult: null,
       stepLogs,

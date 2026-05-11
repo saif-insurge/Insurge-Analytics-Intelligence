@@ -6,6 +6,7 @@
 
 import OpenAI from "openai";
 import { detectAnalyticsPlatforms, type DetectedPlatform } from "@ga4-audit/audit-core";
+import { detectAiProviderError } from "./errors.js";
 
 export type AiAnalysisResult = {
   /** Summary of the site's tracking implementation. */
@@ -206,7 +207,12 @@ Rules for insights:
         }));
       }
     } catch (err) {
-      console.error(`AI analysis failed with ${aiModel}:`, err instanceof Error ? err.message : err);
+      // Billing/quota/auth/rate-limit failures from the AI provider mean we
+      // can't reliably produce analysis — fail the audit instead of silently
+      // returning "AI analysis unavailable" while completing as success.
+      const aiErr = detectAiProviderError(err);
+      if (aiErr) throw aiErr;
+      console.error(`AI analysis failed with ${aiModel} (non-fatal):`, err instanceof Error ? err.message : err);
       summary = "AI analysis unavailable";
     }
   } else {

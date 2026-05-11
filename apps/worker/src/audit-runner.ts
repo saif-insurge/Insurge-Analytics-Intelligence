@@ -12,6 +12,7 @@
 import { Stagehand } from "@browserbasehq/stagehand";
 import { chromium as playwrightCore } from "playwright-core";
 import { runFunnelAgent } from "./funnel-agent.js";
+import { AiProviderError } from "./errors.js";
 import {
   isGa4Endpoint,
   parseGa4Request,
@@ -346,7 +347,11 @@ export async function runAuditPipeline(
       capturedEvents.map((e) => e.name),
     );
   } catch (err) {
-    console.error("AI analysis failed:", err);
+    // AI provider failures (billing/quota/auth/rate-limit) propagate up so
+    // the audit lands as FAILED with a clear reason rather than COMPLETE
+    // with misleading "AI analysis unavailable" placeholder text.
+    if (err instanceof AiProviderError) throw err;
+    console.error("AI analysis failed (non-fatal):", err);
   }
 
   // Finalize and sanitize HAR
