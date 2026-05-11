@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 
 export function ConfirmDeleteModal({
@@ -22,11 +22,46 @@ export function ConfirmDeleteModal({
   loading?: boolean;
 }) {
   const [input, setInput] = useState("");
+  const [copied, setCopied] = useState(false);
   const matches = input === confirmPhrase;
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the confirm input after the dialog opens, without scrolling the
+  // underlying page (Radix's default auto-focus would trigger scroll-into-view).
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(id);
+  }, [open]);
 
   function handleOpenChange(next: boolean) {
-    if (!next) setInput("");
+    if (!next) {
+      setInput("");
+      setCopied(false);
+    }
     onOpenChange(next);
+  }
+
+  async function copyPhrase() {
+    try {
+      await navigator.clipboard.writeText(confirmPhrase);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard API can fail in restricted contexts (e.g. some iframes).
+      // Fall back to a contenteditable trick.
+      const ta = document.createElement("textarea");
+      ta.value = confirmPhrase;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
   }
 
   return (
@@ -34,6 +69,7 @@ export function ConfirmDeleteModal({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 anim-overlay" />
         <Dialog.Content
+          onOpenAutoFocus={(e) => e.preventDefault()}
           className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[min(92vw,30rem)] bg-bg-elevated border border-border rounded-md p-0 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)] overflow-hidden anim-dialog"
         >
           {/* Top hairline with bracket markers */}
@@ -65,20 +101,40 @@ export function ConfirmDeleteModal({
               }}
             >
               <div className="mt-6">
-                <label className="block eyebrow mb-2">
-                  Type{" "}
-                  <span className="font-mono text-danger font-semibold normal-case tracking-normal text-[11px]">
-                    {confirmPhrase}
-                  </span>{" "}
-                  to confirm
-                </label>
+                <div className="flex items-baseline justify-between gap-2 mb-2">
+                  <label className="eyebrow">
+                    Type{" "}
+                    <span className="font-mono text-danger font-semibold normal-case tracking-normal text-[11px]">
+                      {confirmPhrase}
+                    </span>{" "}
+                    to confirm
+                  </label>
+                  <button
+                    type="button"
+                    onClick={copyPhrase}
+                    aria-label={copied ? "Copied" : `Copy "${confirmPhrase}" to clipboard`}
+                    className="inline-flex items-center gap-1 font-mono text-[10px] tracking-wider uppercase text-text-faint hover:text-accent transition-colors cursor-pointer"
+                  >
+                    {copied ? (
+                      <>
+                        <span className="text-accent">✓</span>
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <span aria-hidden>⧉</span>
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
                 <input
+                  ref={inputRef}
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder={confirmPhrase}
-                  autoFocus
-                  className="w-full px-3 py-2.5 bg-bg border border-border rounded-sm text-sm font-mono text-text placeholder:text-text-faint/60 focus:outline-none focus:border-danger focus:ring-1 focus:ring-danger/40 transition-colors"
+                  className="w-full px-3 py-2.5 bg-bg border border-border rounded-sm text-sm font-mono text-text placeholder:text-text-faint/60 focus:outline-none focus-visible:outline-none! focus:border-danger focus:ring-1 focus:ring-danger/40 transition-colors"
                 />
               </div>
 

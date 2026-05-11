@@ -1,15 +1,23 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Show, UserButton } from "@clerk/nextjs";
+import { NewAuditModal } from "@/components/new-audit-modal";
 
 export function Navbar() {
   const pathname = usePathname();
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
 
-  // Hide navbar on auth pages
-  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")) {
+  // Hide navbar on auth pages and on the public /report/:id page (it's a
+  // marketing surface for prospects — no internal app chrome).
+  if (
+    pathname.startsWith("/sign-in") ||
+    pathname.startsWith("/sign-up") ||
+    pathname.startsWith("/report/")
+  ) {
     return null;
   }
 
@@ -21,22 +29,19 @@ export function Navbar() {
   return (
     <>
       <nav className="fixed top-0 left-0 right-0 z-50 bg-bg/85 backdrop-blur-xl border-b border-border">
-        <div className="content-container h-16 flex items-center justify-between gap-6">
+        <div className="content-container h-20 flex items-center justify-between gap-6">
           {/* Brand */}
-          <Link href="/audits" className="flex items-center gap-3 group shrink-0">
+          <Link href="/audits" className="flex items-center gap-4 group shrink-0">
             <Image
               src="/logo.png"
               alt="Insurge"
-              width={36}
-              height={36}
+              width={72}
+              height={72}
               className="rounded-sm transition-transform group-hover:scale-[1.04]"
             />
-            <div className="hidden sm:flex flex-col leading-none gap-1">
-              <span className="font-display text-base font-semibold tracking-tight">Insurge</span>
-              <span className="font-mono text-[9px] tracking-[0.22em] uppercase text-text-faint">
-                Tracking Intelligence
-              </span>
-            </div>
+            <span className="hidden sm:inline font-mono text-[10px] tracking-[0.22em] uppercase text-text-faint">
+              Tracking Intelligence
+            </span>
           </Link>
 
           {/* Center divider */}
@@ -68,21 +73,14 @@ export function Navbar() {
           {/* Right cluster */}
           <div className="flex items-center gap-3">
             <Show when="signed-in">
-              {/* Live indicator */}
-              <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 border border-border rounded-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent live-dot" />
-                <span className="font-mono text-[10px] tracking-wider text-text-muted uppercase">
-                  Vol.01 / {new Date().getFullYear()}
-                </span>
-              </div>
-
-              <Link
-                href="/audits/new"
-                className="group relative flex items-center gap-2 bg-accent hover:bg-accent-hover text-accent-ink px-4 py-2 rounded-sm text-[13px] font-semibold tracking-tight transition-all hover:translate-y-[-1px]"
+              <button
+                type="button"
+                onClick={() => setAuditModalOpen(true)}
+                className="group relative flex items-center gap-2 bg-accent hover:bg-accent-hover text-accent-ink px-4 py-2 rounded-sm text-[13px] font-semibold tracking-tight transition-all hover:translate-y-[-1px] cursor-pointer"
               >
                 <span className="font-mono text-[11px] opacity-70">+</span>
                 New Audit
-              </Link>
+              </button>
               <UserButton
                 appearance={{
                   elements: {
@@ -94,7 +92,8 @@ export function Navbar() {
           </div>
         </div>
       </nav>
-      <div className="pt-20" />
+      <div className="pt-24" />
+      <NewAuditModal open={auditModalOpen} onOpenChange={setAuditModalOpen} />
     </>
   );
 }

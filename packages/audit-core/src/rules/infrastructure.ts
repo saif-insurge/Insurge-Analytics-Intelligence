@@ -19,18 +19,18 @@ export const duplicateProperty: Rule = {
     }
 
     return [makeFinding(duplicateProperty, {
-      severity: "high", status: "fail",
-      title: "Multiple GA4 measurement IDs detected",
-      summary: `Found ${tids.length} GA4 properties: ${tids.join(", ")}. This fragments your data across multiple properties.`,
+      severity: "medium", status: "evaluate",
+      title: "Multiple GA4 properties detected — verify intent",
+      summary: `Found ${tids.length} GA4 properties: ${tids.join(", ")}. Multiple properties can be deliberate (parent + child rollups, dev + prod overlap, source migration, dual setup for an agency handover) — or they can be unintentional duplicates that fragment your data.`,
       evidence: { observed: tids },
-      impact: "Ecommerce data is split across properties, making unified reporting impossible. Users, sessions, and conversions are counted separately in each property.",
+      impact: "If unintentional: ecommerce data is split across properties, users/sessions/conversions are counted separately, and unified reporting becomes harder. If intentional: no impact, but worth documenting why.",
       fix: {
         platformSpecific: {
-          shopify: "Review your theme.liquid, GTM container, and any apps for duplicate GA4 tags. Keep one primary property.",
-          woocommerce: "Check for duplicate GA4 plugins and hardcoded gtag snippets. Remove duplicates.",
-          custom: "Audit all GA4 tag installations. Consolidate to a single measurement ID.",
+          shopify: "Review theme.liquid, GTM container, and any installed apps for duplicate GA4 tags. If both properties are intentional (e.g. one for the brand, one for a parent property), document it. Otherwise consolidate.",
+          woocommerce: "Check for duplicate GA4 plugins and hardcoded gtag snippets. If both are intentional, document it. Otherwise remove duplicates.",
+          custom: "Audit all GA4 tag installations. Confirm whether each property is intentional or leftover from a migration.",
         },
-        estimatedEffort: "1-2 hours",
+        estimatedEffort: "30 min to verify, 1-2 hours to consolidate if needed",
       },
     })];
   },

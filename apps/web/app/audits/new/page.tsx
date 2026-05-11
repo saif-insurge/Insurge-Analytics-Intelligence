@@ -86,7 +86,7 @@ export default function NewAuditPage() {
   }
 
   return (
-    <main className="content-container py-12 max-w-2xl">
+    <main className="content-container py-6 max-w-2xl">
       {/* Editorial header */}
       <Link href="/audits" className="inline-flex items-center gap-2 font-mono text-[11px] text-text-faint hover:text-accent transition-colors mb-8">
         ← Back to log
@@ -98,7 +98,7 @@ export default function NewAuditPage() {
           <span className="eyebrow">Form-A</span>
         </div>
         <div className="hairline mb-6" />
-        <h1 className="font-display text-[3rem] leading-[0.95] font-semibold tracking-[-0.03em]">
+        <h1 className="font-display text-[2.25rem] sm:text-[3rem] leading-[0.95] font-semibold tracking-[-0.03em]">
           Run a synthetic shopper<span className="text-accent">.</span>
         </h1>
         <p className="text-sm text-text-muted mt-3 max-w-lg leading-relaxed">

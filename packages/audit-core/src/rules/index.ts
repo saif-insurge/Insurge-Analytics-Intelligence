@@ -7,12 +7,14 @@ import type { Rule } from "./types.js";
 import { coverageRules } from "./coverage.js";
 import { qualityRules } from "./quality.js";
 import { infrastructureRules } from "./infrastructure.js";
-import { featureRules } from "./features.js";
 import { resetFindingCounter } from "./helpers.js";
 
 export { coverageRules } from "./coverage.js";
 export { qualityRules } from "./quality.js";
 export { infrastructureRules } from "./infrastructure.js";
+// featureRules deprecated — file kept for reference but not registered.
+// We don't reliably detect site search, wishlist, newsletter, or high-intent
+// elements during the funnel walk, so the rules produce noise.
 export { featureRules } from "./features.js";
 export { computeScorecard, RULE_POINTS, CATEGORY_MAX_SCORES } from "./scoring.js";
 
@@ -21,7 +23,6 @@ export const ALL_RULES: Rule[] = [
   ...coverageRules,
   ...qualityRules,
   ...infrastructureRules,
-  ...featureRules,
 ];
 
 /** Runs all rules against the audit document and returns all findings. */

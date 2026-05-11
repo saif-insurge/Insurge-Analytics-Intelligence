@@ -4,58 +4,21 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ConfirmDeleteModal } from "@/components/confirm-delete-modal";
-
-type Finding = {
-  id: string;
-  ruleId: string;
-  category: string;
-  severity: string;
-  status: string;
-  title: string;
-  summary: string;
-  impact?: string;
-  fix?: { platformSpecific?: Record<string, string>; estimatedEffort?: string };
-};
-
-type CapturedEvent = {
-  name: string;
-  tid: string;
-  transport: string;
-  params: Record<string, unknown>;
-  items: Record<string, unknown>[];
-};
-
-type DetectedPlatformData = {
-  name: string;
-  category: "cdp" | "analytics" | "ads" | "pixel" | "tag_manager";
-  requestCount: number;
-  sampleUrls: string[];
-  detectedEvents: string[];
-};
-
-type AiAnalysisData = {
-  summary: string;
-  ga4Present: boolean;
-  insights: { category: "observation" | "issue" | "recommendation"; text: string }[];
-  tokensUsed: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  estimatedCostUsd?: number;
-};
-
-type FunnelStepLogData = {
-  step: number;
-  name: string;
-  instruction: string;
-  observation?: string;
-  urlBefore: string;
-  urlAfter: string;
-  success: boolean;
-  error?: string;
-  eventsCaptureDuringStep: number;
-  timestamp: string;
-  durationMs: number;
-};
+import { AuditTocSidebar, type TocSection } from "@/components/audit-toc-sidebar";
+import {
+  FindingCard,
+  EcommerceEventsSection,
+  FunnelLogSection,
+  AdPixelsSection,
+  AiAnalysisSection,
+  CategoryScores,
+  CATEGORY_LABELS,
+  type Finding,
+  type CapturedEvent,
+  type DetectedPlatformData,
+  type AiAnalysisData,
+  type FunnelStepLogData,
+} from "@/components/audit-sections";
 
 type Audit = {
   id: string;
@@ -75,33 +38,6 @@ type Audit = {
   aiAnalysis: AiAnalysisData | null;
   detectedPlatforms: DetectedPlatformData[] | null;
   funnelLog: FunnelStepLogData[] | null;
-};
-
-/** Canonical GA4 ecommerce funnel events in order. */
-const FUNNEL_EVENTS = [
-  { name: "view_item_list", label: "View Item List" },
-  { name: "select_item", label: "Select Item" },
-  { name: "view_item", label: "View Item" },
-  { name: "add_to_cart", label: "Add to Cart" },
-  { name: "view_cart", label: "View Cart" },
-  { name: "begin_checkout", label: "Begin Checkout" },
-  { name: "add_shipping_info", label: "Add Shipping Info" },
-  { name: "add_payment_info", label: "Add Payment Info" },
-];
-
-const KNOWN_NON_ECOMMERCE = new Set([
-  "page_view", "scroll", "user_engagement", "first_visit", "session_start",
-  "view_item_list", "select_item", "view_item", "add_to_cart", "remove_from_cart",
-  "view_cart", "begin_checkout", "add_shipping_info", "add_payment_info",
-  "purchase", "refund", "add_to_wishlist", "view_promotion", "select_promotion",
-  "search", "generate_lead", "sign_up",
-]);
-
-const CATEGORY_LABELS: Record<string, { label: string; maxScore: number }> = {
-  implementation_coverage: { label: "Implementation Coverage", maxScore: 30 },
-  data_quality: { label: "Data Quality", maxScore: 30 },
-  platform_infrastructure: { label: "Platform & Infrastructure", maxScore: 25 },
-  feature_adoption: { label: "Feature Adoption", maxScore: 15 },
 };
 
 export default function AuditDetailPage() {
@@ -153,7 +89,7 @@ export default function AuditDetailPage() {
   }
 
   return (
-    <main className="content-container py-12">
+    <main className="content-container py-6">
       {/* Back link */}
       <Link
         href="/audits"
@@ -172,9 +108,9 @@ export default function AuditDetailPage() {
         </div>
         <div className="hairline mb-6" />
 
-        <div className="flex flex-wrap items-end justify-between gap-6">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6">
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-[3.25rem] leading-[0.95] font-semibold tracking-[-0.03em] truncate">
+            <h1 className="font-display text-[2.5rem] sm:text-[3.25rem] leading-[0.95] font-semibold tracking-[-0.03em] truncate break-words">
               {audit.domain}
               <span className="text-accent">.</span>
             </h1>
@@ -200,13 +136,15 @@ export default function AuditDetailPage() {
           </div>
 
           {audit.overallScore !== null && (
-            <div className="text-right shrink-0">
+            <div className="sm:text-right shrink-0">
               <span className="eyebrow">Overall</span>
-              <div className={`font-display tnum text-[5rem] leading-none font-semibold ${gradeColor(audit.overallGrade)} mt-1`}>
-                {audit.overallScore}
-              </div>
-              <div className="font-mono text-[10px] text-text-faint mt-1 tracking-wider uppercase">
-                /100 · {audit.overallGrade}
+              <div className="flex items-baseline sm:block gap-3">
+                <div className={`font-display tnum text-[3.5rem] sm:text-[5rem] leading-none font-semibold ${gradeColor(audit.overallGrade)} sm:mt-1`}>
+                  {audit.overallScore}
+                </div>
+                <div className="font-mono text-[10px] text-text-faint sm:mt-1 tracking-wider uppercase">
+                  /100 · {audit.overallGrade}
+                </div>
               </div>
             </div>
           )}
@@ -225,35 +163,29 @@ export default function AuditDetailPage() {
       )}
 
       {/* Results */}
-      {audit.status === "COMPLETE" && (
-        <>
-          {/* Category scores */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-8">
-            {Object.entries(CATEGORY_LABELS).map(([key, { label, maxScore }], idx) => {
-              const catFindings = audit.findings.filter((f) => f.category === key);
-              const failures = catFindings.filter((f) => f.status === "fail").length;
-              return (
-                <div key={key} className="border border-border rounded-md bg-bg-elevated/40 p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-mono text-[10px] tracking-wider text-text-faint uppercase">
-                      §{String(idx + 1).padStart(2, "0")}
-                    </span>
-                    <span className="font-mono text-[10px] text-text-faint tnum">/{maxScore}</span>
-                  </div>
-                  <div className="text-[11px] text-text-muted mb-1.5">{label}</div>
-                  <div className="font-display text-lg font-semibold leading-tight">
-                    {failures === 0 ? (
-                      <span className="text-accent">All clear</span>
-                    ) : (
-                      <span className="text-danger">
-                        {failures}<span className="font-normal text-text-muted text-sm ml-1">issue{failures > 1 ? "s" : ""}</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {audit.status === "COMPLETE" && (() => {
+        // Build TOC sections dynamically — only include those that actually render.
+        const tocSections: TocSection[] = [
+          { id: "overview", label: "Overview" },
+        ];
+        if (audit.funnelLog && audit.funnelLog.length > 0) {
+          tocSections.push({ id: "funnel-walk", label: "Funnel Walk" });
+        }
+        tocSections.push({ id: "ai-analysis", label: "AI Analysis" });
+        if (audit.detectedPlatforms) {
+          tocSections.push({ id: "ad-pixels", label: "Ad Pixels" });
+        }
+        tocSections.push({ id: "events", label: "Ecommerce Events" });
+        if (audit.findings.length > 0) {
+          tocSections.push({ id: "findings", label: "Findings" });
+        }
+
+        return (
+        <div className="lg:grid lg:grid-cols-[180px_1fr] lg:gap-10">
+          <AuditTocSidebar sections={tocSections} />
+          <div className="min-w-0 [&_section]:scroll-mt-8">
+          <section id="overview">
+          <CategoryScores findings={audit.findings} />
 
           {/* Actions */}
           <div className="mb-10 flex items-center gap-2 flex-wrap">
@@ -335,13 +267,17 @@ export default function AuditDetailPage() {
               }
             }}
           />
+          </section>
 
           {/* Funnel Walk Log */}
           {audit.funnelLog && audit.funnelLog.length > 0 && (
-            <FunnelLogSection steps={audit.funnelLog} />
+            <section id="funnel-walk">
+              <FunnelLogSection steps={audit.funnelLog} />
+            </section>
           )}
 
           {/* AI Analysis & Detected Platforms */}
+          <section id="ai-analysis">
           {(audit.aiAnalysis || audit.detectedPlatforms) ? (
             <AiAnalysisSection
               aiAnalysis={audit.aiAnalysis}
@@ -386,13 +322,17 @@ export default function AuditDetailPage() {
               </div>
             </div>
           )}
+          </section>
 
           {/* Ad Pixels & Conversion Tracking */}
           {audit.detectedPlatforms && (
-            <AdPixelsSection platforms={audit.detectedPlatforms} />
+            <section id="ad-pixels">
+              <AdPixelsSection platforms={audit.detectedPlatforms} />
+            </section>
           )}
 
           {/* Ecommerce Events */}
+          <section id="events">
           {audit.events && audit.events.length > 0 ? (
             <EcommerceEventsSection events={audit.events} />
           ) : (
@@ -412,80 +352,36 @@ export default function AuditDetailPage() {
               </ul>
             </div>
           )}
+          </section>
 
           {/* Findings */}
-          <div>
-            <h2 className="font-display text-xl font-semibold mb-4">
-              Findings ({audit.findings.length})
-            </h2>
+          {audit.findings.length > 0 && (
+            <section id="findings">
+              <h2 className="font-display text-xl font-semibold mb-4">
+                Findings ({audit.findings.length})
+              </h2>
 
-            {Object.entries(CATEGORY_LABELS).map(([key, { label }]) => {
-              const catFindings = audit.findings.filter((f) => f.category === key);
-              if (catFindings.length === 0) return null;
-              return (
-                <div key={key} className="mb-6">
-                  <h3 className="text-sm font-medium text-text-muted mb-3 uppercase tracking-wide">{label}</h3>
-                  <div className="space-y-2">
-                    {catFindings.map((f) => (
-                      <FindingCard key={f.id} finding={f} platform={audit.platform} />
-                    ))}
+              {Object.entries(CATEGORY_LABELS).map(([key, { label }]) => {
+                const catFindings = audit.findings.filter((f) => f.category === key);
+                if (catFindings.length === 0) return null;
+                return (
+                  <div key={key} className="mb-6">
+                    <h3 className="text-sm font-medium text-text-muted mb-3 uppercase tracking-wide">{label}</h3>
+                    <div className="space-y-2">
+                      {catFindings.map((f) => (
+                        <FindingCard key={f.id} finding={f} platform={audit.platform} />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </section>
+          )}
           </div>
-        </>
-      )}
+        </div>
+        );
+      })()}
     </main>
-  );
-}
-
-function FindingCard({ finding, platform }: { finding: Finding; platform: string | null }) {
-  const [expanded, setExpanded] = useState(false);
-  const severityClass: Record<string, string> = {
-    critical: "text-severity-critical",
-    high: "text-severity-high",
-    medium: "text-severity-medium",
-    low: "text-severity-low",
-    info: "text-severity-info",
-  };
-  const borderClass = finding.status === "pass" ? "border-l-success" : finding.status === "evaluate" ? "border-l-warning" : "border-l-danger";
-
-  return (
-    <div className={`border border-border rounded-lg border-l-2 ${borderClass} overflow-hidden`}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full text-left px-4 py-3 flex items-center justify-between hover:bg-bg-subtle/50 transition-colors cursor-pointer"
-      >
-        <div className="flex items-center gap-3">
-          <span className={`text-[10px] font-semibold uppercase tracking-wide ${severityClass[finding.severity] ?? "text-text-muted"}`}>
-            {finding.severity}
-          </span>
-          <span className="text-sm font-medium">{finding.title}</span>
-        </div>
-        <span className={`text-xs font-medium ${finding.status === "pass" ? "text-success" : finding.status === "evaluate" ? "text-warning" : "text-danger"}`}>
-          {finding.status}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="px-4 pb-4 border-t border-border-subtle">
-          <p className="text-sm text-text-muted mt-3">{finding.summary}</p>
-          {finding.impact && (
-            <p className="text-sm text-text-faint mt-2 italic">{finding.impact}</p>
-          )}
-          {finding.fix?.platformSpecific && platform && finding.fix.platformSpecific[platform] && (
-            <div className="mt-3 p-3 bg-bg-subtle rounded-md">
-              <div className="text-xs font-medium text-accent mb-1">Fix for {platform}:</div>
-              <p className="text-sm text-text-muted">{finding.fix.platformSpecific[platform]}</p>
-              {finding.fix.estimatedEffort && (
-                <p className="text-xs text-text-faint mt-1">Estimated effort: {finding.fix.estimatedEffort}</p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -518,7 +414,7 @@ function InProgressBanner({ status }: { status: string }) {
 
 function LoadingState() {
   return (
-    <main className="content-container py-20 text-center text-text-muted">
+    <main className="content-container py-10 text-center text-text-muted">
       <svg className="animate-spin h-6 w-6 mx-auto text-accent" viewBox="0 0 24 24">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -530,452 +426,10 @@ function LoadingState() {
 
 function ErrorState({ message }: { message: string }) {
   return (
-    <main className="content-container py-20 text-center">
+    <main className="content-container py-10 text-center">
       <p className="text-danger">{message}</p>
       <Link href="/audits" className="text-sm text-accent mt-4 inline-block">← Back to audits</Link>
     </main>
-  );
-}
-
-function EcommerceEventsSection({ events }: { events: CapturedEvent[] }) {
-  // Group events by name
-  const byName = new Map<string, CapturedEvent[]>();
-  for (const e of events) {
-    if (!e.name) continue;
-    const existing = byName.get(e.name) ?? [];
-    existing.push(e);
-    byName.set(e.name, existing);
-  }
-
-  // Separate into funnel, supplementary ecommerce, and custom
-  const funnelEventNames = new Set(FUNNEL_EVENTS.map((f) => f.name));
-  const customEvents = [...byName.entries()].filter(
-    ([name]) => !KNOWN_NON_ECOMMERCE.has(name),
-  );
-
-  // GA4 property IDs
-  const tids = [...new Set(events.map((e) => e.tid).filter(Boolean))];
-
-  return (
-    <div className="mb-8">
-      <h2 className="font-display text-xl font-semibold mb-4">Ecommerce Events</h2>
-
-      {/* GA4 Properties */}
-      <div className="mb-4 flex items-center gap-2 text-sm text-text-muted">
-        <span>GA4 Properties:</span>
-        {tids.map((tid) => (
-          <span key={tid} className="px-2 py-0.5 bg-bg-subtle border border-border rounded text-xs font-mono">
-            {tid}
-          </span>
-        ))}
-      </div>
-
-      {/* Funnel checklist */}
-      <div className="glass rounded-lg p-5 mb-4">
-        <h3 className="text-sm font-medium text-text-muted mb-3 uppercase tracking-wide">Funnel Event Checklist</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {FUNNEL_EVENTS.map((funnelEvent) => {
-            const captured = byName.get(funnelEvent.name);
-            const found = captured && captured.length > 0;
-            const itemCount = captured?.reduce((sum, e) => sum + (e.items?.length ?? 0), 0) ?? 0;
-            return (
-              <div
-                key={funnelEvent.name}
-                className={`flex items-center gap-2 p-2.5 rounded-md border ${found ? "bg-success/5 border-success/20" : "bg-danger/5 border-danger/20"}`}
-              >
-                <span className={`text-base ${found ? "text-success" : "text-danger"}`}>
-                  {found ? "✓" : "✗"}
-                </span>
-                <div>
-                  <div className={`text-xs font-medium ${found ? "text-text" : "text-danger"}`}>
-                    {funnelEvent.name}
-                  </div>
-                  <div className={`text-[10px] ${found ? "text-success" : "text-danger/70"}`}>
-                    {found ? `${captured!.length}x · ${itemCount} items` : "Not Detected"}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* All captured events summary */}
-      <div className="glass rounded-lg p-5 mb-4">
-        <h3 className="text-sm font-medium text-text-muted mb-3 uppercase tracking-wide">
-          All Captured Events ({events.length} total)
-        </h3>
-        <div className="space-y-1">
-          {[...byName.entries()]
-            .sort(([, a], [, b]) => b.length - a.length)
-            .map(([name, evts]) => {
-              const isFunnel = funnelEventNames.has(name);
-              const isCustom = !KNOWN_NON_ECOMMERCE.has(name);
-              return (
-                <div key={name} className="flex items-center justify-between py-1.5 border-b border-border-subtle last:border-0">
-                  <div className="flex items-center gap-2">
-                    <span className={`font-mono text-sm ${isFunnel ? "text-accent" : isCustom ? "text-warning" : "text-text-muted"}`}>
-                      {name}
-                    </span>
-                    {isFunnel && <span className="text-[10px] px-1.5 py-0.5 bg-accent/10 text-accent rounded">funnel</span>}
-                    {isCustom && <span className="text-[10px] px-1.5 py-0.5 bg-warning/10 text-warning rounded">custom</span>}
-                  </div>
-                  <span className="text-xs text-text-faint">{evts.length}x</span>
-                </div>
-              );
-            })}
-        </div>
-      </div>
-
-      {/* Custom events warning */}
-      {customEvents.length > 0 && (
-        <div className="glass rounded-lg p-5 border-l-2 border-l-warning">
-          <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-            <span className="text-warning">⚠</span>
-            Non-standard Events Detected
-          </h3>
-          <p className="text-xs text-text-muted mb-3">
-            These events don't match GA4's recommended ecommerce event names. They won't populate standard ecommerce reports.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {customEvents.map(([name, evts]) => (
-              <span key={name} className="text-xs px-2 py-1 bg-warning/10 border border-warning/20 text-warning rounded-md font-mono">
-                {name} ({evts.length}x)
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FunnelLogSection({ steps }: { steps: FunnelStepLogData[] }) {
-  const [expandedStep, setExpandedStep] = useState<number | null>(null);
-
-  return (
-    <div className="mb-8">
-      <h2 className="font-display text-xl font-semibold mb-4">Funnel Walk Log</h2>
-      <div className="glass rounded-lg overflow-hidden">
-        <div className="divide-y divide-border-subtle">
-          {steps.map((step) => {
-            const expanded = expandedStep === step.step;
-            const navigated = step.urlBefore !== step.urlAfter;
-
-            return (
-              <div key={step.step}>
-                {/* Clickable header */}
-                <button
-                  onClick={() => setExpandedStep(expanded ? null : step.step)}
-                  className="w-full text-left px-5 py-3 hover:bg-bg-subtle/50 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold ${step.success ? "bg-success/10 text-success" : "bg-danger/10 text-danger"}`}>
-                      {step.success ? "✓" : "✗"}
-                    </span>
-                    <span className="text-sm font-medium capitalize">{step.name.replace(/_/g, " ")}</span>
-                    <span className="text-[10px] text-text-faint font-mono">{(step.durationMs / 1000).toFixed(1)}s</span>
-                    {step.eventsCaptureDuringStep > 0 && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-accent/10 text-accent rounded">
-                        {step.eventsCaptureDuringStep} events
-                      </span>
-                    )}
-                    {!step.success && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-danger/10 text-danger rounded">failed</span>
-                    )}
-                    <span className="ml-auto text-text-faint text-[10px]">{expanded ? "▲" : "▼"}</span>
-                  </div>
-
-                  {/* Summary line — always visible */}
-                  <div className="ml-8 mt-1 text-xs text-text-muted">
-                    {step.observation ? (
-                      <span className="line-clamp-1">{step.observation}</span>
-                    ) : navigated ? (
-                      <span>
-                        Navigated to <span className="text-accent font-mono">{new URL(step.urlAfter).pathname}</span>
-                      </span>
-                    ) : (
-                      <span>
-                        Stayed on <span className="text-text-faint font-mono">{step.urlBefore === "about:blank" ? "blank page" : new URL(step.urlBefore).pathname}</span>
-                      </span>
-                    )}
-                  </div>
-                </button>
-
-                {/* Expanded details */}
-                {expanded && (
-                  <div className="px-5 pb-4 ml-8 space-y-3 border-t border-border-subtle pt-3">
-                    {/* AI instruction */}
-                    <div>
-                      <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">Action</div>
-                      <p className="text-xs text-text-muted">{step.instruction}</p>
-                    </div>
-
-                    {/* Observation */}
-                    {step.observation && (
-                      <div>
-                        <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">Agent Observation</div>
-                        <p className="text-xs text-text leading-relaxed bg-bg-subtle rounded-md p-2.5">{step.observation}</p>
-                      </div>
-                    )}
-
-                    {/* URLs */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">Page Before Action</div>
-                        <p className="text-xs font-mono text-text-muted break-all">{step.urlBefore}</p>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">Page After Action</div>
-                        <p className={`text-xs font-mono break-all ${navigated ? "text-accent" : "text-text-faint"}`}>
-                          {step.urlAfter}
-                          {navigated && <span className="text-success ml-1">(navigated)</span>}
-                          {!navigated && <span className="text-text-faint ml-1">(same page)</span>}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Stats */}
-                    <div className="flex items-center gap-4 text-[10px]">
-                      <span className="text-text-faint">Duration: <span className="text-text-muted font-mono">{step.durationMs}ms</span></span>
-                      <span className="text-text-faint">Events captured: <span className="text-text-muted font-mono">{step.eventsCaptureDuringStep}</span></span>
-                      <span className="text-text-faint">Timestamp: <span className="text-text-muted font-mono">{new Date(step.timestamp).toLocaleTimeString()}</span></span>
-                    </div>
-
-                    {/* Error */}
-                    {step.error && (
-                      <div className="p-3 bg-danger/5 border border-danger/20 rounded-md">
-                        <div className="text-[10px] text-danger uppercase tracking-wide mb-1">Error</div>
-                        <p className="text-xs text-danger/80 font-mono">{step.error}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdPixelsSection({ platforms }: { platforms: DetectedPlatformData[] }) {
-  const adPlatforms = platforms.filter((p) => p.category === "pixel" || p.category === "ads");
-  if (adPlatforms.length === 0) return null;
-
-  // Known standard events per platform for reference
-  const standardEvents: Record<string, string[]> = {
-    "Meta Pixel": ["PageView", "ViewContent", "AddToCart", "InitiateCheckout", "AddPaymentInfo", "Purchase", "Lead", "CompleteRegistration", "Search"],
-    "TikTok Pixel": ["ViewContent", "AddToCart", "PlaceAnOrder", "CompletePayment", "ClickButton", "SubmitForm", "Download"],
-    "Snapchat Pixel": ["PAGE_VIEW", "VIEW_CONTENT", "ADD_CART", "START_CHECKOUT", "PURCHASE", "SIGN_UP"],
-    "Pinterest Tag": ["pagevisit", "viewcategory", "addtocart", "checkout", "lead", "signup"],
-    "Google Ads": ["conversion", "remarketing", "view_through_conversion"],
-    "Twitter/X Pixel": ["PageView", "Purchase", "Download", "SignUp", "AddToCart"],
-    "LinkedIn Insight": ["conversion"],
-    "Microsoft/Bing Ads": ["pageLoad", "conversion"],
-  };
-
-  return (
-    <div className="mb-8">
-      <h2 className="font-display text-xl font-semibold mb-4">Ad Pixels & Conversion Tracking</h2>
-      <div className="space-y-3">
-        {adPlatforms.map((platform) => {
-          const expected = standardEvents[platform.name] ?? [];
-          const detected = platform.detectedEvents;
-          const missing = expected.filter((e) => !detected.includes(e));
-
-          return (
-            <div key={platform.name} className="glass rounded-lg p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${platform.requestCount > 0 ? "bg-success" : "bg-danger"}`} />
-                  <h3 className="text-sm font-semibold">{platform.name}</h3>
-                  <span className="text-[10px] px-2 py-0.5 bg-success/10 text-success border border-success/20 rounded-full">
-                    Active — {platform.requestCount} requests
-                  </span>
-                </div>
-              </div>
-
-              {/* Detected events */}
-              {detected.length > 0 && (
-                <div className="mb-3">
-                  <div className="text-xs text-text-muted mb-1.5">Events Detected</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {detected.map((event) => (
-                      <span key={event} className="text-xs px-2 py-0.5 bg-success/10 text-success border border-success/20 rounded font-mono">
-                        {event}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Missing standard events */}
-              {missing.length > 0 && detected.length > 0 && (
-                <div>
-                  <div className="text-xs text-text-muted mb-1.5">Standard Events Not Detected</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {missing.map((event) => (
-                      <span key={event} className="text-xs px-2 py-0.5 bg-bg-subtle text-text-faint border border-border-subtle rounded font-mono">
-                        {event}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* No events detected at all */}
-              {detected.length === 0 && (
-                <div className="text-xs text-text-faint">
-                  Pixel is loading but no specific events were captured during the audit. Events may fire on interaction or be sent server-side.
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Platforms NOT detected */}
-      {(() => {
-        const majorPixels = ["Meta Pixel", "Google Ads", "TikTok Pixel", "Snapchat Pixel", "Pinterest Tag"];
-        const detectedNames = new Set(adPlatforms.map((p) => p.name));
-        const notDetected = majorPixels.filter((p) => !detectedNames.has(p));
-        if (notDetected.length === 0) return null;
-        return (
-          <div className="mt-3 glass rounded-lg p-4">
-            <div className="text-xs text-text-muted mb-2">Not Detected</div>
-            <div className="flex flex-wrap gap-2">
-              {notDetected.map((name) => (
-                <span key={name} className="text-xs px-2 py-1 bg-bg-subtle text-text-faint border border-border-subtle rounded">
-                  {name}
-                </span>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
-
-function AiAnalysisSection({
-  aiAnalysis,
-  detectedPlatforms,
-  onReanalyze,
-  analyzing,
-}: {
-  aiAnalysis: AiAnalysisData | null;
-  detectedPlatforms: DetectedPlatformData[] | null;
-  onReanalyze?: () => void;
-  analyzing?: boolean;
-}) {
-  const categoryIcons: Record<string, { icon: string; color: string }> = {
-    observation: { icon: "🔍", color: "text-info" },
-    issue: { icon: "⚠", color: "text-warning" },
-    recommendation: { icon: "💡", color: "text-accent" },
-  };
-
-  const categoryColors: Record<string, string> = {
-    cdp: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-    analytics: "bg-info/10 text-info border-info/20",
-    ads: "bg-warning/10 text-warning border-warning/20",
-    pixel: "bg-danger/10 text-danger border-danger/20",
-    tag_manager: "bg-success/10 text-success border-success/20",
-  };
-
-  return (
-    <div className="mb-8 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-display text-xl font-semibold">Tracking Intelligence</h2>
-        {onReanalyze && (
-          <button
-            onClick={onReanalyze}
-            disabled={analyzing}
-            className="text-xs px-3 py-1.5 bg-bg-elevated border border-border hover:border-accent/50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
-          >
-            {analyzing ? "Analyzing..." : "Re-run Analysis"}
-          </button>
-        )}
-      </div>
-
-      {/* AI Summary */}
-      {aiAnalysis && (
-        <div className="glass rounded-lg p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-accent">✦</span>
-            <h3 className="text-sm font-medium uppercase tracking-wide text-text-muted">AI Analysis</h3>
-            {!aiAnalysis.ga4Present && (
-              <span className="text-[10px] px-2 py-0.5 bg-danger/10 text-danger border border-danger/20 rounded-full">No GA4 detected</span>
-            )}
-          </div>
-          <p className="text-sm text-text leading-relaxed mb-4">{aiAnalysis.summary}</p>
-
-          {/* Insights */}
-          {aiAnalysis.insights.length > 0 && (
-            <div className="space-y-2">
-              {aiAnalysis.insights.map((insight, i) => {
-                const style = categoryIcons[insight.category] ?? categoryIcons.observation!;
-                return (
-                  <div key={i} className="flex items-start gap-2.5 py-2 border-b border-border-subtle last:border-0">
-                    <span className={`mt-0.5 ${style.color}`}>{style.icon}</span>
-                    <div>
-                      <span className={`text-[10px] font-medium uppercase tracking-wide ${style.color}`}>
-                        {insight.category}
-                      </span>
-                      <p className="text-sm text-text-muted mt-0.5">{insight.text}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {aiAnalysis.tokensUsed > 0 && (
-            <div className="flex items-center justify-end gap-3 mt-3 text-[10px] text-text-faint">
-              <span>{aiAnalysis.inputTokens?.toLocaleString() ?? "?"} in / {aiAnalysis.outputTokens?.toLocaleString() ?? "?"} out tokens</span>
-              {aiAnalysis.estimatedCostUsd !== undefined && aiAnalysis.estimatedCostUsd > 0 && (
-                <span className="px-1.5 py-0.5 bg-bg-subtle rounded">
-                  ${aiAnalysis.estimatedCostUsd.toFixed(4)}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Detected Platforms */}
-      {detectedPlatforms && detectedPlatforms.length > 0 && (
-        <div className="glass rounded-lg p-5">
-          <h3 className="text-sm font-medium uppercase tracking-wide text-text-muted mb-3">
-            Detected Tracking Platforms ({detectedPlatforms.length})
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {detectedPlatforms.map((platform) => (
-              <div
-                key={platform.name}
-                className={`flex items-center justify-between p-3 rounded-md border ${categoryColors[platform.category] ?? "bg-bg-subtle text-text-muted border-border"}`}
-              >
-                <div>
-                  <div className="text-sm font-medium">{platform.name}</div>
-                  <div className="text-[10px] opacity-70 capitalize">{platform.category.replace("_", " ")}</div>
-                  {platform.detectedEvents.length > 0 && (
-                    <div className="text-[10px] opacity-60 mt-0.5">
-                      Events: {platform.detectedEvents.slice(0, 4).join(", ")}
-                      {platform.detectedEvents.length > 4 && "..."}
-                    </div>
-                  )}
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold">{platform.requestCount}</div>
-                  <div className="text-[10px] opacity-60">requests</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
   );
 }
 

@@ -10,6 +10,16 @@ model Organization {
   id        String   @id
   name      String
   createdAt DateTime @default(now())
+
+  // Report customization (all optional, fall back to REPORT_DEFAULTS in UI).
+  reportCompanyName String?
+  reportTagline     String?
+  reportCtaHeadline String?
+  reportCtaBody     String?
+  reportCtaLabel    String?
+  reportCtaUrl      String?
+  reportFooterNote  String?
+
   audits    Audit[]
   apiKeys   ApiKey[]
 }

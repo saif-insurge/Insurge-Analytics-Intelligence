@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { ReportBrandingForm } from "@/components/report-branding-form";
 
 type CostStats = {
   totalCost: number;
@@ -25,7 +26,7 @@ export default function SettingsPage() {
   }, []);
 
   return (
-    <main className="content-container py-12">
+    <main className="content-container py-6">
       <header className="mb-10 rise">
         <div className="flex items-baseline justify-between gap-6 mb-1">
           <span className="eyebrow">/ Configuration · §02</span>
@@ -70,8 +71,17 @@ export default function SettingsPage() {
         </div>
       </Section>
 
+      {/* Report Branding */}
+      <Section
+        number="03"
+        title="Report Branding"
+        subtitle="Customize the public /report page shared with prospects"
+      >
+        <ReportBrandingForm previewAuditId={costs?.audits?.[0]?.id ?? null} />
+      </Section>
+
       {/* Cost Overview */}
-      <Section number="03" title="Inference Ledger" subtitle="Cumulative AI spend across all audits">
+      <Section number="04" title="Inference Ledger" subtitle="Cumulative AI spend across all audits">
         {loading ? (
           <div className="border border-border rounded-md bg-bg-elevated/40 p-12 text-center text-text-muted text-sm">
             <div className="animate-pulse font-mono text-[11px] tracking-wider uppercase">

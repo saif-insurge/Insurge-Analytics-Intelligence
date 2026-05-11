@@ -2,53 +2,62 @@
 
 import type { Finding, FindingCategory, FindingStatus, Scorecard } from "../types.js";
 
-/** Point allocation per rule. If a rule isn't listed, it defaults to 0 points. */
+/**
+ * Point allocation per rule. If a rule isn't listed, it defaults to 0 points.
+ * Per-category totals match CATEGORY_MAX_SCORES so a category can hit max.
+ *
+ * `feature_tracking.*` rules are kept here for backward-compat — old findings
+ * in the DB may reference them — but new audits don't run those rules.
+ */
 export const RULE_POINTS: Record<string, number> = {
-  // Coverage (30 total)
-  "ga4.ecommerce.view_item_list.missing": 5,
-  "ga4.ecommerce.view_item.missing": 5,
-  "ga4.ecommerce.add_to_cart.missing": 7,
+  // Coverage (35 total)
+  "ga4.ecommerce.view_item_list.missing": 6,
+  "ga4.ecommerce.view_item.missing": 6,
+  "ga4.ecommerce.add_to_cart.missing": 8,
   "ga4.ecommerce.view_cart.missing": 3,
-  "ga4.ecommerce.begin_checkout.missing": 5,
-  "ga4.ecommerce.naming.snake_case": 3,
+  "ga4.ecommerce.begin_checkout.missing": 6,
+  "ga4.ecommerce.naming.snake_case": 4,
   "ga4.ecommerce.naming.canonical": 2,
 
-  // Quality (30 total)
-  "ga4.params.currency.missing": 6,
-  "ga4.params.value.missing": 6,
-  "ga4.items.item_id.missing": 6,
-  "ga4.items.item_name.missing": 5,
-  "ga4.items.item_id.inconsistent": 4,
+  // Quality (35 total)
+  "ga4.params.currency.missing": 7,
+  "ga4.params.value.missing": 7,
+  "ga4.items.item_id.missing": 7,
+  "ga4.items.item_name.missing": 6,
+  "ga4.items.item_id.inconsistent": 5,
   "ga4.items.price_zero": 3,
 
-  // Infrastructure (25 total)
-  "ga4.tags.duplicate_property": 8,
-  "ga4.tags.legacy_ua": 4,
-  "ga4.consent.mode_v2_missing": 5,
-  "ga4.tags.gtm_present": 5,
+  // Infrastructure (30 total)
+  "ga4.tags.duplicate_property": 10,
+  "ga4.tags.legacy_ua": 5,
+  "ga4.consent.mode_v2_missing": 6,
+  "ga4.tags.gtm_present": 6,
   "ga4.tags.hardcoded": 3,
 
-  // Features (15 total)
-  "feature_tracking.search.untracked": 4,
-  "feature_tracking.wishlist.untracked": 3,
-  "feature_tracking.newsletter.untracked": 4,
-  "feature_tracking.high_intent_buttons.untracked": 4,
+  // Features — deprecated, no longer scored (kept for historical findings)
+  "feature_tracking.search.untracked": 0,
+  "feature_tracking.wishlist.untracked": 0,
+  "feature_tracking.newsletter.untracked": 0,
+  "feature_tracking.high_intent_buttons.untracked": 0,
 };
 
-/** Category max scores. */
-export const CATEGORY_MAX_SCORES: Record<FindingCategory, number> = {
-  implementation_coverage: 30,
-  data_quality: 30,
-  platform_infrastructure: 25,
-  feature_adoption: 15,
+/**
+ * Category max scores. Renormalized to 100 after dropping feature_adoption.
+ * `feature_adoption` is intentionally absent — the rules don't run anymore
+ * (we don't reliably measure those signals during the funnel walk) and
+ * the category is no longer surfaced in the UI.
+ */
+export const CATEGORY_MAX_SCORES: Partial<Record<FindingCategory, number>> = {
+  implementation_coverage: 35,
+  data_quality: 35,
+  platform_infrastructure: 30,
 };
 
-/** Category display labels. */
-const CATEGORY_LABELS: Record<FindingCategory, string> = {
+/** Category display labels. Same exclusion as CATEGORY_MAX_SCORES. */
+const CATEGORY_LABELS: Partial<Record<FindingCategory, string>> = {
   implementation_coverage: "Implementation Coverage",
   data_quality: "Data Quality",
   platform_infrastructure: "Platform & Infrastructure",
-  feature_adoption: "Feature Adoption",
 };
 
 /** Grade based on percentage: 80%+ = pass, 50-79% = evaluate, <50% = fail. */
@@ -68,16 +77,16 @@ function pointsForFinding(finding: Finding): number {
 
 /** Compute the full scorecard from a list of findings. */
 export function computeScorecard(findings: Finding[]): Scorecard {
+  // Only the active scored categories (feature_adoption is deprecated).
   const categories: FindingCategory[] = [
     "implementation_coverage",
     "data_quality",
     "platform_infrastructure",
-    "feature_adoption",
   ];
 
   const categoryScores = categories.map((category) => {
     const categoryFindings = findings.filter((f) => f.category === category);
-    const maxScore = CATEGORY_MAX_SCORES[category];
+    const maxScore = CATEGORY_MAX_SCORES[category] ?? 0;
     const earned = categoryFindings.reduce((sum, f) => sum + pointsForFinding(f), 0);
     const score = Math.min(earned, maxScore);
     const pct = maxScore > 0 ? (score / maxScore) * 100 : 100;
@@ -97,7 +106,7 @@ export function computeScorecard(findings: Finding[]): Scorecard {
 
     return {
       name: category,
-      label: CATEGORY_LABELS[category],
+      label: CATEGORY_LABELS[category] ?? category,
       score,
       maxScore,
       grade: gradeFromPercentage(pct),

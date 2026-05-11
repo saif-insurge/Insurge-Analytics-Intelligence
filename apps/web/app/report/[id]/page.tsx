@@ -1,6 +1,23 @@
 import { prisma } from "@/lib/db";
 import { notFound } from "next/navigation";
+import Image from "next/image";
 import type { Metadata } from "next";
+import { resolveBranding } from "@/lib/report-defaults";
+import { AuditTocSidebar } from "@/components/audit-toc-sidebar";
+import {
+  CategoryScores,
+  EcommerceEventsSection,
+  FunnelLogSection,
+  AdPixelsSection,
+  AiAnalysisSection,
+  FindingCard,
+  CATEGORY_LABELS,
+  type Finding,
+  type CapturedEvent,
+  type AiAnalysisData,
+  type DetectedPlatformData,
+  type FunnelStepLogData,
+} from "@/components/audit-sections";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -8,15 +25,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const audit = await prisma.audit.findUnique({
     where: { id },
-    select: { domain: true, overallScore: true },
+    select: {
+      domain: true,
+      overallScore: true,
+      organization: { select: { reportCompanyName: true, reportTagline: true } },
+    },
   });
   if (!audit) return { title: "Report Not Found" };
+  const branding = resolveBranding(audit.organization);
   return {
-    title: `Insurge — ${audit.domain} Tracking Audit (${audit.overallScore}/100)`,
-    description: `GA4 ecommerce tracking audit for ${audit.domain}. Score: ${audit.overallScore}/100. View findings and recommendations.`,
+    title: `${branding.companyName} — ${audit.domain} Tracking Audit (${audit.overallScore}/100)`,
+    description: `${branding.tagline} for ${audit.domain}. Score: ${audit.overallScore}/100.`,
     openGraph: {
-      title: `Insurge — ${audit.domain} Tracking Audit`,
-      description: `Score: ${audit.overallScore}/100. Automated GA4 ecommerce tracking analysis with platform-specific recommendations.`,
+      title: `${branding.companyName} — ${audit.domain} Tracking Audit`,
+      description: `Score: ${audit.overallScore}/100. ${branding.tagline}.`,
     },
   };
 }
@@ -25,140 +47,267 @@ export default async function ReportPage({ params }: Props) {
   const { id } = await params;
   const audit = await prisma.audit.findUnique({
     where: { id },
-    include: { findings: { orderBy: { severity: "asc" } } },
+    include: {
+      findings: { orderBy: { severity: "asc" } },
+      organization: {
+        select: {
+          reportCompanyName: true,
+          reportTagline: true,
+          reportCtaHeadline: true,
+          reportCtaBody: true,
+          reportCtaLabel: true,
+          reportCtaUrl: true,
+          reportFooterNote: true,
+        },
+      },
+    },
   });
 
   if (!audit || audit.status !== "COMPLETE") {
     notFound();
   }
 
-  const findings = audit.findings;
-  const failFindings = findings.filter((f) => f.status === "fail");
-  const evalFindings = findings.filter((f) => f.status === "evaluate");
-  const passFindings = findings.filter((f) => f.status === "pass");
+  const branding = resolveBranding(audit.organization);
+  const findings = audit.findings as unknown as Finding[];
+  const events = (audit.events as unknown as CapturedEvent[] | null) ?? [];
+  const aiAnalysis = audit.aiAnalysis as unknown as AiAnalysisData | null;
+  const detectedPlatforms = audit.detectedPlatforms as unknown as DetectedPlatformData[] | null;
+  const funnelLog = audit.funnelLog as unknown as FunnelStepLogData[] | null;
+
+  // Build TOC sections (only those that actually render).
+  const tocSections = [
+    { id: "overview", label: "Overview" },
+    ...(funnelLog && funnelLog.length > 0 ? [{ id: "funnel-walk", label: "Funnel Walk" }] : []),
+    ...(aiAnalysis ? [{ id: "ai-analysis", label: "Analysis" }] : []),
+    ...(detectedPlatforms ? [{ id: "ad-pixels", label: "Ad Pixels" }] : []),
+    ...(events.length > 0 ? [{ id: "events", label: "Ecommerce Events" }] : []),
+    ...(findings.length > 0 ? [{ id: "findings", label: "Findings" }] : []),
+    { id: "next-steps", label: "Next Steps" },
+  ];
 
   return (
     <>
       <TrackingPixels auditId={id} domain={audit.domain} />
 
-      <main className="content-container py-12">
-        {/* Report header */}
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center gap-2 mb-3 px-3 py-1 bg-accent-subtle border border-accent/20 rounded-full">
-            <img src="/logo.png" alt="Insurge" width={16} height={16} />
-            <span className="text-xs font-medium text-accent-hover">Insurge — GA4 Ecommerce Tracking Audit</span>
-          </div>
-          <h1 className="font-display text-3xl font-bold mb-2">{audit.domain}</h1>
-          <p className="text-sm text-text-muted">
-            Audited {new Date(audit.completedAt!).toLocaleDateString()} · Platform: {audit.platform ?? "custom"}
-          </p>
-
-          {/* Score */}
-          <div className="mt-8 inline-flex flex-col items-center">
-            <div className={`text-6xl font-display font-bold ${gradeColor(audit.overallGrade)}`}>
-              {audit.overallScore}
+      {/* Report header — distinct from internal /audits/:id, marketing-friendly */}
+      <header className="relative border-b border-border-subtle bg-gradient-to-b from-accent/[0.04] via-bg to-bg overflow-hidden">
+        <div
+          aria-hidden
+          className="absolute inset-0 opacity-[0.04] pointer-events-none"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)",
+            backgroundSize: "24px 24px",
+          }}
+        />
+        <div className="content-container py-6 sm:py-10 md:py-14 relative">
+          {/* Top strip: logo + powered-by + CTA */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-6 sm:mb-10">
+            <Image
+              src="/logo.png"
+              alt={branding.companyName}
+              width={96}
+              height={96}
+              className="rounded-sm"
+              priority
+            />
+            <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+              {branding.companyName !== "Insurge" && (
+                <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-text-faint">
+                  Powered by Insurge
+                </div>
+              )}
+              {branding.ctaUrl && branding.ctaLabel && (
+                <a
+                  href={branding.ctaUrl}
+                  className="inline-flex items-center gap-2 bg-accent hover:bg-accent-hover text-accent-ink px-4 py-2 rounded-sm text-sm font-semibold tracking-tight transition-all hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_rgba(212,255,58,0.5)]"
+                >
+                  {branding.ctaLabel}
+                  <span className="font-mono text-xs">→</span>
+                </a>
+              )}
             </div>
-            <div className="text-sm text-text-muted mt-1">out of 100</div>
-            <div className={`mt-2 px-3 py-1 rounded-full text-xs font-medium ${gradeBadge(audit.overallGrade)}`}>
-              {audit.overallGrade === "pass" ? "Good" : audit.overallGrade === "evaluate" ? "Needs Work" : "Critical Issues"}
+          </div>
+
+          {/* Hero */}
+          <div className="flex flex-col md:grid md:grid-cols-[1fr_auto] gap-6 md:gap-8 md:items-end">
+            <div className="min-w-0">
+              <div className="font-mono text-[11px] tracking-[0.22em] uppercase text-text-faint mb-3">
+                {branding.tagline}
+              </div>
+              <h1 className="font-display text-[2rem] sm:text-[2.5rem] md:text-[3.75rem] leading-[0.95] font-semibold tracking-[-0.03em] break-words">
+                {audit.domain}
+                <span className="text-accent">.</span>
+              </h1>
+              <p className="text-sm text-text-muted mt-4 flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span>Audited {new Date(audit.completedAt!).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
+                {audit.platform && (
+                  <span className="font-mono text-text-faint">
+                    · platform <span className="text-text-muted capitalize">{audit.platform}</span>
+                  </span>
+                )}
+              </p>
             </div>
-          </div>
-        </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-12">
-          <div className="glass rounded-lg p-4 text-center">
-            <div className="text-2xl font-bold text-danger">{failFindings.length}</div>
-            <div className="text-xs text-text-muted mt-1">Issues Found</div>
-          </div>
-          <div className="glass rounded-lg p-4 text-center">
-            <div className="text-2xl font-bold text-warning">{evalFindings.length}</div>
-            <div className="text-xs text-text-muted mt-1">To Review</div>
-          </div>
-          <div className="glass rounded-lg p-4 text-center">
-            <div className="text-2xl font-bold text-success">{passFindings.length}</div>
-            <div className="text-xs text-text-muted mt-1">Passing</div>
-          </div>
-        </div>
-
-        {/* Failing issues */}
-        {failFindings.length > 0 && (
-          <section className="mb-10">
-            <h2 className="font-display text-xl font-semibold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-danger" />
-              Issues Requiring Attention
-            </h2>
-            <div className="space-y-3">
-              {failFindings.map((f) => (
-                <div key={f.id} className="border border-danger/20 bg-danger/5 rounded-lg p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm font-semibold">{f.title}</h3>
-                    <span className="shrink-0 text-[10px] font-semibold text-danger uppercase">{f.severity}</span>
+            {/* Score card */}
+            {audit.overallScore !== null && (
+              <div className="w-full md:w-auto md:min-w-[200px] relative overflow-hidden border border-border bg-gradient-to-br from-bg-elevated/80 to-bg-elevated/40 backdrop-blur rounded-lg p-5 md:p-6 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.4)]">
+                <div
+                  aria-hidden
+                  className={`absolute inset-x-0 top-0 h-0.5 ${
+                    audit.overallGrade === "pass"
+                      ? "bg-success"
+                      : audit.overallGrade === "evaluate"
+                      ? "bg-warning"
+                      : "bg-danger"
+                  }`}
+                />
+                <div className="flex items-center justify-between md:flex-col md:items-end gap-4 md:gap-3">
+                  <div className="md:text-right">
+                    <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-text-faint">
+                      Overall Score
+                    </div>
+                    <div className="mt-2 flex items-baseline gap-1.5 md:justify-end">
+                      <span className={`font-display tnum text-[3.5rem] md:text-[4.25rem] leading-none font-semibold tracking-tight ${gradeColor(audit.overallGrade)}`}>
+                        {audit.overallScore}
+                      </span>
+                      <span className="font-mono text-xs text-text-faint tracking-wider">/100</span>
+                    </div>
                   </div>
-                  <p className="text-sm text-text-muted mt-2">{f.summary}</p>
-                  {f.impact && <p className="text-xs text-text-faint mt-2">{f.impact}</p>}
+                  <span className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wider border ${gradeBadge(audit.overallGrade)}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      audit.overallGrade === "pass"
+                        ? "bg-success"
+                        : audit.overallGrade === "evaluate"
+                        ? "bg-warning"
+                        : "bg-danger"
+                    }`} />
+                    {audit.overallGrade === "pass" ? "Healthy" : audit.overallGrade === "evaluate" ? "Needs Work" : "Critical Issues"}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
 
-        {/* Items to review */}
-        {evalFindings.length > 0 && (
-          <section className="mb-10">
-            <h2 className="font-display text-xl font-semibold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-warning" />
-              Items to Review
-            </h2>
-            <div className="space-y-3">
-              {evalFindings.map((f) => (
-                <div key={f.id} className="border border-warning/20 bg-warning/5 rounded-lg p-4">
-                  <h3 className="text-sm font-semibold">{f.title}</h3>
-                  <p className="text-sm text-text-muted mt-1">{f.summary}</p>
+      <main className="content-container py-6 sm:py-10">
+        <div className="lg:grid lg:grid-cols-[180px_1fr] lg:gap-10">
+          <AuditTocSidebar sections={tocSections} />
+          <div className="min-w-0 [&_section]:scroll-mt-8">
+            {/* Overview */}
+            <section id="overview">
+              <CategoryScores findings={findings} />
+
+              {/* Download PDF CTA — keep as marketing asset */}
+              <div className="mb-10">
+                <a
+                  href={`/api/audits/${audit.id}/pdf`}
+                  className="text-sm font-medium px-4 py-2 bg-accent hover:bg-accent-hover text-accent-ink rounded-sm transition-all hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_rgba(212,255,58,0.5)] inline-flex items-center gap-2"
+                >
+                  <span className="font-mono text-xs">↓</span>
+                  Download PDF report
+                </a>
+              </div>
+            </section>
+
+            {/* Funnel Walk */}
+            {funnelLog && funnelLog.length > 0 && (
+              <section id="funnel-walk">
+                <FunnelLogSection steps={funnelLog} />
+              </section>
+            )}
+
+            {/* AI Analysis (read-only — no re-run) */}
+            {aiAnalysis && (
+              <section id="ai-analysis">
+                <AiAnalysisSection
+                  aiAnalysis={aiAnalysis}
+                  detectedPlatforms={detectedPlatforms}
+                  heading="Analysis"
+                />
+              </section>
+            )}
+
+            {/* Ad Pixels */}
+            {detectedPlatforms && (
+              <section id="ad-pixels">
+                <AdPixelsSection platforms={detectedPlatforms} />
+              </section>
+            )}
+
+            {/* Ecommerce Events */}
+            {events.length > 0 && (
+              <section id="events">
+                <EcommerceEventsSection events={events} />
+              </section>
+            )}
+
+            {/* Findings */}
+            {findings.length > 0 && (
+              <section id="findings">
+                <h2 className="font-display text-xl font-semibold mb-4">
+                  Findings ({findings.length})
+                </h2>
+
+                {Object.entries(CATEGORY_LABELS).map(([key, { label }]) => {
+                  const catFindings = findings.filter((f) => f.category === key);
+                  if (catFindings.length === 0) return null;
+                  return (
+                    <div key={key} className="mb-6">
+                      <h3 className="text-sm font-medium text-text-muted mb-3 uppercase tracking-wide">{label}</h3>
+                      <div className="space-y-2">
+                        {catFindings.map((f) => (
+                          <FindingCard key={f.id} finding={f} platform={audit.platform} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </section>
+            )}
+
+            {/* Distinct CTA footer — configurable per org */}
+            <section
+              id="next-steps"
+              className="mt-12 relative overflow-hidden rounded-xl border border-accent/30 bg-gradient-to-br from-accent/[0.08] via-bg-elevated to-bg-elevated p-5 sm:p-8 md:p-12"
+            >
+              <div
+                aria-hidden
+                className="absolute inset-0 opacity-[0.05] pointer-events-none"
+                style={{
+                  backgroundImage:
+                    "radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)",
+                  backgroundSize: "20px 20px",
+                }}
+              />
+              <div className="relative">
+                <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent mb-3">
+                  Next steps
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+                <h2 className="font-display text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight mb-3">
+                  {branding.ctaHeadline}
+                </h2>
+                <p className="text-text-muted text-sm md:text-base leading-relaxed mb-6 max-w-xl whitespace-pre-line">
+                  {branding.ctaBody}
+                </p>
+                <a
+                  href={branding.ctaUrl}
+                  className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-accent hover:bg-accent-hover text-accent-ink px-6 py-3 rounded-sm font-medium transition-all hover:translate-y-[-1px] hover:shadow-[0_12px_32px_-8px_rgba(212,255,58,0.6)]"
+                >
+                  {branding.ctaLabel}
+                  <span className="font-mono text-xs">→</span>
+                </a>
+                <p className="text-xs text-text-faint mt-4">{branding.footerNote}</p>
+              </div>
+            </section>
 
-        {/* Passing */}
-        {passFindings.length > 0 && (
-          <section className="mb-10">
-            <h2 className="font-display text-xl font-semibold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-success" />
-              Passing ({passFindings.length})
-            </h2>
-            <div className="space-y-1">
-              {passFindings.map((f) => (
-                <div key={f.id} className="flex items-center gap-2 text-sm text-text-muted py-1">
-                  <span className="text-success">✓</span>
-                  {f.title}
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* CTA */}
-        <section className="mt-16 glass rounded-xl p-8 text-center">
-          <h2 className="font-display text-xl font-bold mb-2">Ready to fix these issues?</h2>
-          <p className="text-text-muted text-sm mb-6">
-            We provide professional GA4 ecommerce implementation services.
-            Get all identified issues fixed with platform-specific solutions.
-          </p>
-          <a
-            href="mailto:saif@insurge.co"
-            className="inline-block bg-accent hover:bg-accent-hover text-white px-6 py-3 rounded-lg font-medium transition-colors glow-accent"
-          >
-            Get a Quote
-          </a>
-          <p className="text-xs text-text-faint mt-3">Typical project: $500–$1,500 depending on complexity</p>
-        </section>
-
-        {/* Footer */}
-        <footer className="mt-12 pt-6 border-t border-border-subtle text-center text-xs text-text-faint">
-          Generated by Insurge · {new Date(audit.completedAt!).toLocaleDateString()}
-        </footer>
+            {/* Footer */}
+            <footer className="mt-12 pt-6 border-t border-border-subtle text-center text-xs text-text-faint">
+              Generated by {branding.companyName} · {new Date(audit.completedAt!).toLocaleDateString()}
+            </footer>
+          </div>
+        </div>
       </main>
     </>
   );
@@ -198,7 +347,7 @@ function gradeColor(grade: string | null): string {
 }
 
 function gradeBadge(grade: string | null): string {
-  if (grade === "pass") return "bg-success/10 text-success";
-  if (grade === "evaluate") return "bg-warning/10 text-warning";
-  return "bg-danger/10 text-danger";
+  if (grade === "pass") return "bg-success/10 text-success border-success/30";
+  if (grade === "evaluate") return "bg-warning/10 text-warning border-warning/30";
+  return "bg-danger/10 text-danger border-danger/30";
 }

@@ -8,6 +8,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ConfirmDeleteModal } from "@/components/confirm-delete-modal";
+import { NewAuditModal } from "@/components/new-audit-modal";
 
 type Audit = {
   id: string;
@@ -64,6 +65,7 @@ function AuditsPageContent() {
   const [rowDelete, setRowDelete] = useState<Audit | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
+  const [newAuditOpen, setNewAuditOpen] = useState(false);
 
   // Debounce search
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -217,19 +219,18 @@ function AuditsPageContent() {
   const filtersActive = !!(debouncedSearch || statusFilter.length > 0 || scoreMin || scoreMax);
 
   return (
-    <main className="content-container py-12">
+    <main className="content-container py-6">
       {/* ─── Editorial Header ─────────────────────────────── */}
       <header className="mb-10 rise">
-        <div className="flex items-baseline justify-between gap-6 mb-1">
-          <span className="eyebrow">/ Index · Vol.01 · {new Date().getFullYear()}</span>
+        <div className="flex items-baseline justify-end gap-6 mb-1">
           <span className="eyebrow tnum">
             <span className="text-text-muted">{total}</span> records on file
           </span>
         </div>
         <div className="hairline mb-6" />
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="font-display text-[3.5rem] leading-[0.95] font-semibold tracking-[-0.03em]">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="font-display text-[2.5rem] sm:text-[3.5rem] leading-[0.95] font-semibold tracking-[-0.03em]">
               Field Log<span className="text-accent">.</span>
             </h1>
             <p className="text-sm text-text-muted mt-3 max-w-md">
@@ -237,21 +238,22 @@ function AuditsPageContent() {
               <span className="italic font-display"> noted</span>.
             </p>
           </div>
-          <Link
-            href="/audits/new"
-            className="group inline-flex items-center gap-3 bg-accent hover:bg-accent-hover text-accent-ink px-5 py-3 rounded-sm font-semibold tracking-tight transition-all hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_rgba(212,255,58,0.5)]"
+          <button
+            type="button"
+            onClick={() => setNewAuditOpen(true)}
+            className="group inline-flex w-full sm:w-auto items-center justify-center gap-3 bg-accent hover:bg-accent-hover text-accent-ink px-5 py-3 rounded-sm font-semibold tracking-tight transition-all hover:translate-y-[-1px] hover:shadow-[0_8px_24px_-8px_rgba(212,255,58,0.5)] cursor-pointer"
           >
             <span className="font-mono text-sm">+</span>
             New Audit
             <span className="font-mono text-[10px] opacity-50 ml-1">↵</span>
-          </Link>
+          </button>
         </div>
       </header>
 
       {/* ─── Filter Bar ─────────────────────────────── */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 rise" style={{ animationDelay: "0.05s" }}>
+      <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 rise" style={{ animationDelay: "0.05s" }}>
         {/* Search */}
-        <div className="relative flex-1 min-w-[220px] max-w-md">
+        <div className="relative w-full sm:flex-1 sm:min-w-[220px] sm:max-w-md">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[11px] text-text-faint pointer-events-none select-none">
             /
           </span>
@@ -260,7 +262,7 @@ function AuditsPageContent() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="search domains"
-            className="w-full pl-7 pr-3 py-2 bg-bg-elevated border border-border rounded-sm text-sm font-mono text-text placeholder:text-text-faint/60 focus:outline-none focus:border-accent focus:bg-bg-subtle transition-colors"
+            className="w-full h-9 pl-7 pr-3 py-0 bg-bg-elevated border border-border rounded-sm text-sm font-mono text-text placeholder:text-text-faint/60 focus:outline-none focus:border-accent focus:bg-bg-subtle transition-colors"
           />
           {search && (
             <button
@@ -274,7 +276,7 @@ function AuditsPageContent() {
         </div>
 
         {/* Status filter */}
-        <div className="flex items-center gap-1 px-1 py-1 bg-bg-elevated border border-border rounded-sm">
+        <div className="flex flex-wrap items-center gap-1 h-9 px-1 bg-bg-elevated border border-border rounded-sm">
           {STATUS_OPTIONS.map((status) => (
             <button
               key={status}
@@ -291,7 +293,7 @@ function AuditsPageContent() {
         </div>
 
         {/* Score range */}
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-elevated border border-border rounded-sm">
+        <div className="flex items-center gap-1.5 h-9 px-3 bg-bg-elevated border border-border rounded-sm">
           <span className="eyebrow">Score</span>
           <input
             type="number"
@@ -318,7 +320,7 @@ function AuditsPageContent() {
         <select
           value={pageSize}
           onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-          className="px-3 py-2 bg-bg-elevated border border-border rounded-sm text-xs font-mono text-text-muted focus:outline-none focus:border-accent cursor-pointer"
+          className="h-9 px-3 bg-bg-elevated border border-border rounded-sm text-xs font-mono text-text-muted focus:outline-none focus:border-accent cursor-pointer"
         >
           {PAGE_SIZE_OPTIONS.map((size) => (
             <option key={size} value={size}>{size}/page</option>
@@ -363,6 +365,9 @@ function AuditsPageContent() {
           </div>
         )}
       </div>
+
+      {/* New audit modal */}
+      <NewAuditModal open={newAuditOpen} onOpenChange={setNewAuditOpen} />
 
       {/* Bulk delete modal */}
       <ConfirmDeleteModal
@@ -424,8 +429,101 @@ function AuditsPageContent() {
         }}
       />
 
-      {/* ─── Table ─────────────────────────────── */}
-      <div className="border border-border rounded-md overflow-hidden bg-bg-elevated/40 rise" style={{ animationDelay: "0.1s" }}>
+      {/* ─── Mobile cards (below sm) ─────────────────── */}
+      <div className="sm:hidden space-y-2 rise" style={{ animationDelay: "0.1s" }}>
+        {loading ? (
+          Array.from({ length: Math.min(pageSize, 5) }).map((_, i) => (
+            <div key={i} className="border border-border rounded-md bg-bg-elevated/40 p-4 animate-pulse">
+              <div className="h-4 bg-bg-subtle rounded w-2/3 mb-3" />
+              <div className="h-3 bg-bg-subtle rounded w-1/2" />
+            </div>
+          ))
+        ) : audits.length === 0 ? (
+          <div className="border border-border rounded-md bg-bg-elevated/40 text-center py-12 px-6">
+            <div className="font-display text-2xl text-text-faint mb-2">
+              {filtersActive ? "Nothing matches." : "No audits yet."}
+            </div>
+            <p className="text-sm text-text-muted">
+              {filtersActive ? "Try a wider filter." : "The log is empty."}
+            </p>
+            <button
+              type="button"
+              onClick={() => setNewAuditOpen(true)}
+              className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-accent hover:text-accent-hover cursor-pointer"
+            >
+              <span className="font-mono">+</span>
+              Run your first audit
+              <span className="font-mono">→</span>
+            </button>
+          </div>
+        ) : (
+          audits.map((audit) => {
+            const inProgress = ["PENDING", "RUNNING", "ANALYZING", "RENDERING"].includes(audit.status);
+            const isSelected = selected.has(audit.id);
+            return (
+              <div
+                key={audit.id}
+                className={`border rounded-md transition-colors ${
+                  isSelected ? "border-accent/40 bg-accent/[0.04]" : "border-border bg-bg-elevated/40"
+                }`}
+              >
+                {/* Top row: checkbox + domain + actions */}
+                <div className="flex items-center gap-3 px-3 pt-3">
+                  <Checkbox checked={isSelected} onCheckedChange={() => toggleOne(audit.id)} />
+                  <Link
+                    href={`/audits/${audit.id}`}
+                    className="flex-1 min-w-0 text-sm font-medium text-text hover:text-accent transition-colors truncate"
+                  >
+                    {audit.domain}
+                  </Link>
+                  <RowActions
+                    audit={audit}
+                    rerunning={rerunningId === audit.id}
+                    onRerun={() => handleRerun(audit)}
+                    onCopyLink={() => handleCopyLink(audit)}
+                    onDelete={() => setRowDelete(audit)}
+                  />
+                </div>
+                {/* Bottom row: status + score + platform + date */}
+                <Link
+                  href={`/audits/${audit.id}`}
+                  className="flex items-center justify-between gap-3 px-3 pb-3 pt-2 flex-wrap"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <StatusBadge status={audit.status} />
+                    {audit.platform && (
+                      <span className="text-[11px] text-text-faint capitalize">
+                        · {audit.platform}
+                      </span>
+                    )}
+                    <span
+                      className="font-mono text-[10px] text-text-faint"
+                      title={new Date(audit.queuedAt).toLocaleString()}
+                    >
+                      · {relativeTime(audit.queuedAt)}
+                    </span>
+                  </div>
+                  {audit.overallScore !== null ? (
+                    <span className={`font-display tnum text-lg font-semibold leading-none ${scoreColor(audit.overallGrade)}`}>
+                      {audit.overallScore}
+                      <span className="text-text-faint font-normal text-[10px] ml-0.5">
+                        /100
+                      </span>
+                    </span>
+                  ) : inProgress ? (
+                    <span className="font-mono text-xs text-text-faint">…</span>
+                  ) : (
+                    <span className="font-mono text-xs text-text-faint">—</span>
+                  )}
+                </Link>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* ─── Table (sm+ only) ─────────────────────── */}
+      <div className="hidden sm:block border border-border rounded-md overflow-hidden bg-bg-elevated/40 rise" style={{ animationDelay: "0.1s" }}>
         <table className="w-full">
           <colgroup>
             <col className="w-10" />
@@ -464,14 +562,15 @@ function AuditsPageContent() {
                         ? "Try a wider filter, or "
                         : "The log is empty. "}
                     </p>
-                    <Link
-                      href="/audits/new"
-                      className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-accent hover:text-accent-hover"
+                    <button
+                      type="button"
+                      onClick={() => setNewAuditOpen(true)}
+                      className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-accent hover:text-accent-hover cursor-pointer"
                     >
                       <span className="font-mono">+</span>
                       Run your first audit
                       <span className="font-mono">→</span>
-                    </Link>
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -549,7 +648,7 @@ function AuditsPageContent() {
 
       {/* ─── Pagination ─────────────────────────────── */}
       {total > 0 && (
-        <div className="flex items-center justify-between mt-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-5">
           <span className="font-mono text-[11px] text-text-faint tnum">
             Showing <span className="text-text-muted">{startItem}–{endItem}</span> of <span className="text-text-muted">{total}</span>
           </span>
