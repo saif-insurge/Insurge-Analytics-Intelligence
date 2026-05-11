@@ -7,100 +7,105 @@ dotenv.config({ path: resolve(__dirname, "../../../.env") });
 
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { Receiver } from "@upstash/qstash";
 import { prisma, Prisma } from "@ga4-audit/db";
 import { runAuditPipeline } from "./audit-runner.js";
 import { analyzeNetworkRequests } from "./ai-analysis.js";
 
 const app = new Hono();
-
-// QStash signature verifier (disabled in dev mode)
-const receiver =
-  process.env.QSTASH_CURRENT_SIGNING_KEY && process.env.QSTASH_NEXT_SIGNING_KEY
-    ? new Receiver({
-        currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY,
-        nextSigningKey: process.env.QSTASH_NEXT_SIGNING_KEY,
-      })
-    : null;
+const SHARED_SECRET = process.env.WORKER_SHARED_SECRET;
 
 app.get("/health", (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+/**
+ * Dispatch endpoint — called by the web app's scheduler.
+ *
+ * The handler AWAITS the full pipeline so Cloud Run sees the request as
+ * in-flight for the entire 5-15 min audit duration. This lets Cloud Run's
+ * concurrency + max-instances act as a real concurrency cap.
+ */
 app.post("/audit", async (c) => {
-  // 1. Verify QStash signature (skip in dev)
-  if (receiver) {
-    const signature = c.req.header("upstash-signature");
-    const body = await c.req.text();
-    try {
-      const isValid = await receiver.verify({ signature: signature!, body });
-      if (!isValid) return c.text("Invalid signature", 401);
-    } catch {
-      return c.text("Signature verification failed", 401);
-    }
-    // Re-parse body after text() consumed it
-    const payload = JSON.parse(body);
-    return handleAudit(c, payload);
+  // Shared-secret auth (replaces QStash signature verification).
+  if (SHARED_SECRET && c.req.header("x-worker-token") !== SHARED_SECRET) {
+    return c.text("Unauthorized", 401);
   }
 
-  // Dev mode — no signature verification
-  const payload = await c.req.json();
-  return handleAudit(c, payload);
+  const payload = await c.req.json().catch(() => ({}));
+  const auditId: string | undefined = payload?.auditId;
+  if (!auditId) return c.json({ error: "Missing auditId" }, 400);
+
+  const existing = await prisma.audit.findUnique({ where: { id: auditId } });
+  if (!existing) return c.json({ error: "Audit not found" }, 404);
+
+  // Idempotency: COMPLETE/FAILED audits are no-ops. PENDING shouldn't reach us
+  // (the scheduler claims rows as RUNNING before dispatch), but tolerate it.
+  if (existing.status === "COMPLETE" || existing.status === "FAILED") {
+    pingScheduler();
+    return c.json({ message: "Already terminal", auditId, status: existing.status }, 200);
+  }
+
+  try {
+    await runAuditPipeline({
+      auditId,
+      url: existing.url,
+      operator: existing.createdById,
+      organizationId: existing.organizationId,
+      userId: existing.createdById,
+      notifyEmail: existing.notifyEmail ?? undefined,
+      onStatus: async (status) => {
+        try {
+          await prisma.audit.update({
+            where: { id: auditId },
+            data: {
+              status: status as "RUNNING" | "ANALYZING" | "RENDERING" | "COMPLETE",
+              ...(status === "RUNNING" ? { startedAt: new Date() } : {}),
+              ...(status === "COMPLETE" ? { completedAt: new Date() } : {}),
+            },
+          });
+        } catch (err) {
+          // Log loudly — a silently-dropped status update means the orphan
+          // sweep is our only recovery path.
+          console.error(`[${auditId}] Failed to update status to ${status}:`, err);
+        }
+      },
+    });
+    return c.json({ ok: true, auditId });
+  } catch (err) {
+    console.error(`[${auditId}] Audit failed:`, err);
+    try {
+      await prisma.audit.update({
+        where: { id: auditId },
+        data: {
+          status: "FAILED",
+          failedAt: new Date(),
+          failureReason: err instanceof Error ? err.message : String(err),
+        },
+      });
+    } catch (dbErr) {
+      // Worst case: orphan sweep catches this in ORPHAN_AGE_MINUTES.
+      console.error(`[${auditId}] Failed to mark audit as FAILED:`, dbErr);
+    }
+    return c.json({ error: "Audit failed", auditId }, 500);
+  } finally {
+    // Free the next slot immediately — fire-and-forget ping back to the web
+    // scheduler. If the ping fails, the Coolify cron will catch up within 60s.
+    pingScheduler();
+  }
 });
 
-async function handleAudit(
-  c: { json: (data: unknown, status?: number) => Response },
-  payload: { auditId: string; notifyEmail?: string },
-) {
-  const { auditId, notifyEmail } = payload;
-  if (!auditId) {
-    return c.json({ error: "Missing auditId" }, 400);
-  }
-
-  // Check if audit exists and is not already complete
-  const existing = await prisma.audit.findUnique({ where: { id: auditId } });
-  if (!existing) {
-    return c.json({ error: "Audit not found" }, 404);
-  }
-  if (existing.status === "COMPLETE") {
-    return c.json({ message: "Audit already complete", auditId }, 200);
-  }
-
-  // Fire and forget — respond to QStash quickly, run audit in background
-  runAuditPipeline({
-    auditId,
-    url: existing.url,
-    operator: existing.createdById,
-    organizationId: existing.organizationId,
-    userId: existing.createdById,
-    notifyEmail,
-    onStatus: async (status) => {
-      try {
-        await prisma.audit.update({
-          where: { id: auditId },
-          data: {
-            status: status as "RUNNING" | "ANALYZING" | "RENDERING" | "COMPLETE",
-            ...(status === "RUNNING" ? { startedAt: new Date() } : {}),
-            ...(status === "COMPLETE" ? { completedAt: new Date() } : {}),
-          },
-        });
-      } catch (err) {
-        console.error(`Failed to update status to ${status}:`, err);
-      }
-    },
-  }).catch(async (err) => {
-    console.error(`Audit ${auditId} failed:`, err);
-    await prisma.audit.update({
-      where: { id: auditId },
-      data: {
-        status: "FAILED",
-        failedAt: new Date(),
-        failureReason: err instanceof Error ? err.message : String(err),
-      },
-    }).catch(() => {});
+/** Fire-and-forget ping to the web app's scheduler tick endpoint. */
+function pingScheduler(): void {
+  const webUrl = process.env.WEB_BASE_URL;
+  const token = process.env.SCHEDULER_TOKEN;
+  if (!webUrl || !token) return;
+  void fetch(`${webUrl}/api/scheduler/tick`, {
+    method: "POST",
+    headers: { "X-Scheduler-Token": token },
+    keepalive: true,
+  }).catch((err) => {
+    console.error("Scheduler ping failed (cron will catch up):", err);
   });
-
-  return c.json({ accepted: true, auditId });
 }
 
 // ─── Re-analyze: re-run AI analysis on existing audit data ──────────

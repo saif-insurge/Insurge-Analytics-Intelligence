@@ -68,6 +68,7 @@ model Audit {
   funnelLog      Json?
 
   operatorNotes  String?  @default("")
+  notifyEmail    String?
 
   @@index([organizationId, queuedAt])
   @@index([status])

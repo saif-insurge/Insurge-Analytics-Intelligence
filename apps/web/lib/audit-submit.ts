@@ -1,5 +1,5 @@
-import { Client } from "@upstash/qstash";
 import { prisma } from "@/lib/db";
+import { tick } from "@/lib/scheduler";
 
 export type CreateAuditInput = {
   organizationId: string;
@@ -10,8 +10,11 @@ export type CreateAuditInput = {
 };
 
 /**
- * Creates an Audit row, then enqueues to the worker via QStash (or direct fetch fallback).
- * Caller is responsible for upserting Organization/User if they're not already known to exist.
+ * Creates an Audit row (status=PENDING) and pings the scheduler so it gets
+ * dispatched immediately if a slot is open.
+ *
+ * Caller is responsible for upserting Organization/User if they're not already
+ * known to exist (use `ensureOrgAndUser` below).
  */
 export async function createAudit(input: CreateAuditInput): Promise<{ auditId: string }> {
   const { organizationId, userId, url, notes, notifyEmail } = input;
@@ -25,26 +28,14 @@ export async function createAudit(input: CreateAuditInput): Promise<{ auditId: s
       domain,
       status: "PENDING",
       operatorNotes: notes ?? "",
+      notifyEmail: notifyEmail ?? null,
     },
   });
 
-  const workerUrl = process.env.WORKER_BASE_URL;
-  if (workerUrl) {
-    if (process.env.QSTASH_TOKEN) {
-      const qstash = new Client({ token: process.env.QSTASH_TOKEN });
-      await qstash.publishJSON({
-        url: `${workerUrl}/audit`,
-        body: { auditId: audit.id, notifyEmail },
-      });
-    } else {
-      // Dev fallback: fire-and-forget direct call to the worker
-      fetch(`${workerUrl}/audit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ auditId: audit.id, notifyEmail }),
-      }).catch(() => {});
-    }
-  }
+  // Fire scheduler tick. If a slot is open this audit gets RUNNING + dispatched
+  // right now; otherwise it waits in PENDING for the next slot to free.
+  // Fire-and-forget — don't make the caller wait for the dispatch round trip.
+  void tick().catch((err) => console.error("Scheduler tick on submit failed:", err));
 
   return { auditId: audit.id };
 }
