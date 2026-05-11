@@ -32,7 +32,7 @@ steps:
     args:
       - 'run'
       - 'deploy'
-      - 'worker'
+      - 'insurge-analytics-intel-audit-runner'
       - '--region=europe-west1'
       - '--image=europe-west1-docker.pkg.dev/$PROJECT_ID/insurge-analytics/worker:$BUILD_ID'
 
