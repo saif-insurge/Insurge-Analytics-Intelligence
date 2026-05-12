@@ -32,11 +32,31 @@ type CostStats = {
 export default function SettingsPage() {
   const [costs, setCosts] = useState<CostStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [costsError, setCostsError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/settings/costs")
-      .then((r) => r.json())
-      .then(setCosts)
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok || data.error) {
+          setCostsError(data.error ?? `HTTP ${r.status}`);
+          return;
+        }
+        // Coerce in case the API returns null/undefined for fields we expect numeric.
+        const safe: CostStats = {
+          totalCost: Number(data.totalCost ?? 0),
+          totalFunnelCost: Number(data.totalFunnelCost ?? 0),
+          totalAnalysisCost: Number(data.totalAnalysisCost ?? 0),
+          totalInputTokens: Number(data.totalInputTokens ?? 0),
+          totalOutputTokens: Number(data.totalOutputTokens ?? 0),
+          totalTokens: Number(data.totalTokens ?? 0),
+          totalAudits: Number(data.totalAudits ?? 0),
+          averageCostPerAudit: Number(data.averageCostPerAudit ?? 0),
+          audits: Array.isArray(data.audits) ? data.audits : [],
+        };
+        setCosts(safe);
+      })
+      .catch((err) => setCostsError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));
   }, []);
 
