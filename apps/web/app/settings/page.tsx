@@ -4,14 +4,29 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ReportBrandingForm } from "@/components/report-branding-form";
 
+type AuditCostRow = {
+  id: string;
+  domain: string;
+  funnelTokens: number;
+  funnelCost: number;
+  funnelModel: string | null;
+  analysisTokens: number;
+  analysisCost: number;
+  analysisModel: string | null;
+  totalCost: number;
+  date: string;
+};
+
 type CostStats = {
   totalCost: number;
+  totalFunnelCost: number;
+  totalAnalysisCost: number;
   totalInputTokens: number;
   totalOutputTokens: number;
   totalTokens: number;
   totalAudits: number;
   averageCostPerAudit: number;
-  audits: { id: string; domain: string; cost: number; tokens: number; date: string }[];
+  audits: AuditCostRow[];
 };
 
 export default function SettingsPage() {
@@ -112,19 +127,17 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Token breakdown */}
+            {/* Cost breakdown by source */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-              <TokenCard
-                label="Input Tokens"
-                count={costs.totalInputTokens}
-                rate={2.5}
-                rateLabel="$2.50/MTok"
+              <CostCard
+                label="Funnel Agent (Stagehand)"
+                cost={costs.totalFunnelCost}
+                hint="LLM cost during synthetic shopper walk"
               />
-              <TokenCard
-                label="Output Tokens"
-                count={costs.totalOutputTokens}
-                rate={15.0}
-                rateLabel="$15.00/MTok"
+              <CostCard
+                label="Tracking Analysis (Post-walk)"
+                cost={costs.totalAnalysisCost}
+                hint="OpenAI analysis of captured requests"
               />
             </div>
 
@@ -142,8 +155,9 @@ export default function SettingsPage() {
                   <thead>
                     <tr className="border-y border-border bg-bg-subtle/40">
                       <th className="text-left px-5 py-2.5"><span className="eyebrow">Domain</span></th>
-                      <th className="text-right px-5 py-2.5"><span className="eyebrow">Tokens</span></th>
-                      <th className="text-right px-5 py-2.5"><span className="eyebrow">Cost</span></th>
+                      <th className="text-right px-3 py-2.5"><span className="eyebrow">Funnel</span></th>
+                      <th className="text-right px-3 py-2.5"><span className="eyebrow">Analysis</span></th>
+                      <th className="text-right px-3 py-2.5"><span className="eyebrow">Total</span></th>
                       <th className="text-right px-5 py-2.5"><span className="eyebrow">Date</span></th>
                     </tr>
                   </thead>
@@ -156,11 +170,16 @@ export default function SettingsPage() {
                             <span className="font-mono text-[10px] text-text-faint">→</span>
                           </Link>
                         </td>
-                        <td className="text-xs text-text-muted px-5 py-3 font-mono tnum text-right">
-                          {a.tokens.toLocaleString()}
+                        <td className="px-3 py-3 text-right">
+                          <div className="text-xs font-mono tnum text-text-muted">${a.funnelCost.toFixed(4)}</div>
+                          <div className="text-[10px] font-mono text-text-faint">{a.funnelTokens.toLocaleString()} tok</div>
                         </td>
-                        <td className="text-xs text-accent px-5 py-3 font-mono tnum text-right">
-                          ${a.cost.toFixed(4)}
+                        <td className="px-3 py-3 text-right">
+                          <div className="text-xs font-mono tnum text-text-muted">${a.analysisCost.toFixed(4)}</div>
+                          <div className="text-[10px] font-mono text-text-faint">{a.analysisTokens.toLocaleString()} tok</div>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <span className="text-sm font-mono tnum text-accent">${a.totalCost.toFixed(4)}</span>
                         </td>
                         <td className="text-xs text-text-faint px-5 py-3 font-mono text-right">
                           {new Date(a.date).toLocaleDateString()}
@@ -219,29 +238,15 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TokenCard({
-  label,
-  count,
-  rate,
-  rateLabel,
-}: {
-  label: string;
-  count: number;
-  rate: number;
-  rateLabel: string;
-}) {
+function CostCard({ label, cost, hint }: { label: string; cost: number; hint?: string }) {
   return (
     <div className="border border-border rounded-md bg-bg-elevated/40 p-5">
       <div className="eyebrow mb-2">{label}</div>
       <div className="font-display tnum text-3xl font-semibold tracking-tight">
-        {count.toLocaleString()}
+        <span className="text-accent">$</span>
+        {cost.toFixed(4)}
       </div>
-      <div className="flex items-center gap-2 mt-2">
-        <span className="font-mono text-xs text-accent tnum">
-          ${((count / 1_000_000) * rate).toFixed(4)}
-        </span>
-        <span className="font-mono text-[10px] text-text-faint">@ {rateLabel}</span>
-      </div>
+      {hint && <div className="font-mono text-[10px] text-text-faint mt-2">{hint}</div>}
     </div>
   );
 }

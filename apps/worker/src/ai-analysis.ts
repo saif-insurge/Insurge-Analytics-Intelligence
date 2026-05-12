@@ -26,8 +26,10 @@ export type AiAnalysisResult = {
   inputTokens: number;
   /** Output tokens. */
   outputTokens: number;
-  /** Estimated cost in USD. */
+  /** Estimated cost in USD (computed at audit time with then-current rates). */
   estimatedCostUsd: number;
+  /** Model used for analysis (e.g. "gpt-4.1-mini"); null when AI was skipped. */
+  model: string | null;
 };
 
 /** Analyze captured network requests using platform detection + AI. */
@@ -65,6 +67,9 @@ export async function analyzeNetworkRequests(
   let inputTokens = 0;
   let outputTokens = 0;
   let estimatedCostUsd = 0;
+  // Hoisted so it's in scope at the return statement; only meaningful when the
+  // OpenAI branch below actually runs. Otherwise stays null.
+  let modelUsed: string | null = null;
 
   // GPT-5.4 pricing (per token) — configurable via env vars
   const INPUT_COST_PER_TOKEN = parseFloat(process.env.AI_INPUT_COST_PER_MTOK ?? "2.5") / 1_000_000;
@@ -138,6 +143,7 @@ Analyze the above data and answer these SPECIFIC questions:
 Be SPECIFIC and DEFINITIVE. Say "Rudderstack IS being used as the CDP" not "URLs suggest server-side tracking." If you see gtm-*.appspot.com, say "Server-side GTM container detected at [hostname]." Name the specific platforms and how they connect.`;
 
     const aiModel = process.env.AI_ANALYSIS_MODEL ?? "gpt-4.1-mini";
+    modelUsed = aiModel;
     try {
       // ─── Call 1: Analysis with web search (free-text response) ─────
       const researchCompletion = await openai.responses.create({
@@ -230,5 +236,6 @@ Rules for insights:
     inputTokens,
     outputTokens,
     estimatedCostUsd,
+    model: modelUsed,
   };
 }

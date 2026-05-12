@@ -157,6 +157,13 @@ type EventSummary = {
   latestTimestamp: string;
 };
 
+/** Token usage from Stagehand's agent.execute() result. */
+export type FunnelAgentUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  inferenceMs: number;
+};
+
 /** Run the funnel walk using Stagehand's agent API. */
 export async function runFunnelAgent(
   stagehand: Stagehand,
@@ -165,7 +172,12 @@ export async function runFunnelAgent(
   harEntries?: HarEntry[],
   /** Live reference to ALL network request URLs (for ad pixel detection). */
   allRequestUrls?: string[],
-): Promise<{ agentResult: FunnelAgentResult | null; stepLogs: FunnelStepLog[] }> {
+): Promise<{
+  agentResult: FunnelAgentResult | null;
+  stepLogs: FunnelStepLog[];
+  usage: FunnelAgentUsage | null;
+  model: string;
+}> {
   const stepLogs: FunnelStepLog[] = [];
   let stepCounter = 0;
   let lastHarCheckIndex = 0;
@@ -449,9 +461,23 @@ export async function runFunnelAgent(
       output: auditResultSchema,
     });
 
+    // Stagehand exposes per-execute token usage directly on the result.
+    // Shape: { input_tokens, output_tokens, inference_time_ms, ... } (see
+    // AgentResult in @browserbasehq/stagehand types).
+    const u = result.usage;
+    const usage: FunnelAgentUsage | null = u
+      ? {
+          inputTokens: u.input_tokens,
+          outputTokens: u.output_tokens,
+          inferenceMs: u.inference_time_ms,
+        }
+      : null;
+
     return {
       agentResult: (result.output as FunnelAgentResult) ?? null,
       stepLogs,
+      usage,
+      model,
     };
   } catch (err) {
     // AI provider failures (billing cap, quota, auth, rate limit) short-circuit
@@ -467,6 +493,8 @@ export async function runFunnelAgent(
     return {
       agentResult: null,
       stepLogs,
+      usage: null,
+      model,
     };
   }
 }

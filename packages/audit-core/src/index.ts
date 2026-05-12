@@ -18,3 +18,5 @@ export { assembleAuditDocument } from "./assembler.js";
 export type { RawAuditCapture } from "./assembler.js";
 export { detectAnalyticsPlatforms } from "./analytics-detector.js";
 export type { DetectedPlatform } from "./analytics-detector.js";
+export { MODEL_PRICING, estimateCost } from "./pricing.js";
+export type { ModelPricing } from "./pricing.js";

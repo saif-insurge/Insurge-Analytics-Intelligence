@@ -15,6 +15,10 @@ export async function persistAudit(
     aiAnalysis?: unknown;
     detectedPlatforms?: unknown;
     funnelLog?: unknown;
+    funnelInputTokens?: number | null;
+    funnelOutputTokens?: number | null;
+    funnelInferenceMs?: number | null;
+    funnelModel?: string | null;
   },
 ) {
   const audit = auditDoc.audit;
@@ -51,6 +55,10 @@ export async function persistAudit(
     aiAnalysis: (meta.aiAnalysis ?? null) as Prisma.InputJsonValue,
     detectedPlatforms: (meta.detectedPlatforms ?? null) as Prisma.InputJsonValue,
     funnelLog: (meta.funnelLog ?? null) as Prisma.InputJsonValue,
+    funnelInputTokens: meta.funnelInputTokens ?? null,
+    funnelOutputTokens: meta.funnelOutputTokens ?? null,
+    funnelInferenceMs: meta.funnelInferenceMs ?? null,
+    funnelModel: meta.funnelModel ?? null,
   };
 
   // Delete existing findings if re-running

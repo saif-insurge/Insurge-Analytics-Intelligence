@@ -70,6 +70,14 @@ model Audit {
   operatorNotes  String?  @default("")
   notifyEmail    String?
 
+  // Stagehand funnel agent token usage + model (Gemini/OpenAI/Anthropic).
+  // Cost is computed on-the-fly from MODEL_PRICING — no stored cost column
+  // so historical rows auto-update if a provider changes prices.
+  funnelInputTokens  Int?
+  funnelOutputTokens Int?
+  funnelInferenceMs  Int?
+  funnelModel        String?
+
   @@index([organizationId, queuedAt])
   @@index([status])
 }

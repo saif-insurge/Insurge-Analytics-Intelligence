@@ -228,12 +228,23 @@ export async function runAuditPipeline(
   });
 
   let funnelLog: FunnelStepLog[] = [];
+  let funnelInputTokens: number | null = null;
+  let funnelOutputTokens: number | null = null;
+  let funnelInferenceMs: number | null = null;
+  let funnelModel: string | null = null;
 
   // ─── 3. Walk the funnel using autonomous agent ─────────────────────
   try {
     console.log("Starting funnel agent...");
-    const { agentResult, stepLogs } = await runFunnelAgent(stagehand, url, har.entries, allRequestUrls);
+    const { agentResult, stepLogs, usage, model } = await runFunnelAgent(stagehand, url, har.entries, allRequestUrls);
     funnelLog = stepLogs;
+    funnelModel = model;
+    if (usage) {
+      funnelInputTokens = usage.inputTokens;
+      funnelOutputTokens = usage.outputTokens;
+      funnelInferenceMs = usage.inferenceMs;
+      console.log(`Funnel agent usage: ${usage.inputTokens} in / ${usage.outputTokens} out / ${(usage.inferenceMs / 1000).toFixed(1)}s (${model})`);
+    }
 
     if (agentResult) {
       console.log(`Agent completed. Pages visited: ${agentResult.pagesVisited.filter(p => p.visited).map(p => p.page).join(", ")}`);
@@ -364,8 +375,12 @@ export async function runAuditPipeline(
       await persistAudit(auditDoc, {
         organizationId,
         createdById: userId,
-        aiAnalysis: aiAnalysis ? { summary: aiAnalysis.summary, insights: aiAnalysis.insights, ga4Present: aiAnalysis.ga4Present, tokensUsed: aiAnalysis.tokensUsed, inputTokens: aiAnalysis.inputTokens, outputTokens: aiAnalysis.outputTokens, estimatedCostUsd: aiAnalysis.estimatedCostUsd } : null,
+        aiAnalysis: aiAnalysis ? { summary: aiAnalysis.summary, insights: aiAnalysis.insights, ga4Present: aiAnalysis.ga4Present, tokensUsed: aiAnalysis.tokensUsed, inputTokens: aiAnalysis.inputTokens, outputTokens: aiAnalysis.outputTokens, estimatedCostUsd: aiAnalysis.estimatedCostUsd, model: aiAnalysis.model } : null,
         detectedPlatforms: aiAnalysis?.detectedPlatforms ?? null,
+        funnelInputTokens,
+        funnelOutputTokens,
+        funnelInferenceMs,
+        funnelModel,
         funnelLog,
       });
     } catch (err) {
