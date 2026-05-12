@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ReportBrandingForm } from "@/components/report-branding-form";
+import { ModelPricingForm } from "@/components/model-pricing-form";
 
 type AuditCostRow = {
   id: string;
@@ -92,18 +93,9 @@ export default function SettingsPage() {
         </Link>
       </Section>
 
-      {/* AI Model Configuration */}
-      <Section number="02" title="Model Configuration">
-        <div className="border border-border rounded-md bg-bg-elevated/40 p-5">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <ConfigCell label="Model" value="gpt-5.4" mono />
-            <ConfigCell label="Input · per MTok" value={`$${process.env.NEXT_PUBLIC_AI_INPUT_COST ?? "2.50"}`} mono />
-            <ConfigCell label="Output · per MTok" value={`$${process.env.NEXT_PUBLIC_AI_OUTPUT_COST ?? "15.00"}`} mono />
-          </div>
-          <p className="text-[10px] text-text-faint mt-5 font-mono">
-            Pricing configured via env: AI_INPUT_COST_PER_MTOK · AI_OUTPUT_COST_PER_MTOK
-          </p>
-        </div>
+      {/* Model Pricing — per-model token rates used by the Inference Ledger */}
+      <Section number="02" title="Model Pricing" subtitle="USD per 1M tokens · edit rates here to recompute historical cost">
+        <ModelPricingForm />
       </Section>
 
       {/* Report Branding */}
@@ -237,15 +229,6 @@ function Section({
       </div>
       {children}
     </section>
-  );
-}
-
-function ConfigCell({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div>
-      <div className="eyebrow mb-1.5">{label}</div>
-      <div className={`text-base text-text ${mono ? "font-mono tnum" : ""}`}>{value}</div>
-    </div>
   );
 }
 

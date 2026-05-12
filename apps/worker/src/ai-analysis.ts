@@ -66,14 +66,14 @@ export async function analyzeNetworkRequests(
   let tokensUsed = 0;
   let inputTokens = 0;
   let outputTokens = 0;
-  let estimatedCostUsd = 0;
+  // estimatedCostUsd is no longer computed here — the web app derives cost at
+  // read time from the per-model rates in the ModelPrice table. We persist 0
+  // for new rows; the costs API falls back to old audits' stored value when
+  // present, so historical data still renders.
+  const estimatedCostUsd = 0;
   // Hoisted so it's in scope at the return statement; only meaningful when the
   // OpenAI branch below actually runs. Otherwise stays null.
   let modelUsed: string | null = null;
-
-  // GPT-5.4 pricing (per token) — configurable via env vars
-  const INPUT_COST_PER_TOKEN = parseFloat(process.env.AI_INPUT_COST_PER_MTOK ?? "2.5") / 1_000_000;
-  const OUTPUT_COST_PER_TOKEN = parseFloat(process.env.AI_OUTPUT_COST_PER_MTOK ?? "15") / 1_000_000;
 
   if (process.env.OPENAI_API_KEY && urlPatterns.size > 0) {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -196,7 +196,6 @@ Rules for insights:
       inputTokens = call1Input + call2Input;
       outputTokens = call1Output + call2Output;
       tokensUsed = inputTokens + outputTokens;
-      estimatedCostUsd = (inputTokens * INPUT_COST_PER_TOKEN) + (outputTokens * OUTPUT_COST_PER_TOKEN);
 
       const content = structureCompletion.output_text;
       if (content) {

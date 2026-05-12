@@ -82,6 +82,25 @@ model Audit {
   @@index([status])
 }
 
+/**
+ * Per-model token pricing, edited via Settings → Model Pricing.
+ * Cost is computed at read time (apps/web/lib/pricing.ts) so historical
+ * audits recompute automatically when a row is edited — no migration
+ * needed when providers change rates.
+ */
+model ModelPrice {
+  model         String   @id          // e.g. "google/gemini-3-flash-preview" or "gpt-4.1-mini"
+  inputPerMTok  Float                  // USD per 1,000,000 input tokens
+  outputPerMTok Float                  // USD per 1,000,000 output tokens
+  displayName   String?                // optional human label
+  provider      String?                // optional grouping ("google", "openai", etc.)
+  notes         String?                // optional free-text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([provider])
+}
+
 enum AuditStatus {
   PENDING
   RUNNING

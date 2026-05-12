@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { estimateCost } from "@ga4-audit/audit-core";
+import { estimateCost } from "@/lib/pricing";
 
 /**
  * GET /api/settings/costs — aggregate AI cost stats across all audits.
@@ -61,7 +61,7 @@ export async function GET() {
       // Funnel-agent tokens (Stagehand)
       const fIn = audit.funnelInputTokens ?? 0;
       const fOut = audit.funnelOutputTokens ?? 0;
-      const funnelCost = estimateCost(audit.funnelModel, fIn, fOut) ?? 0;
+      const funnelCost = (await estimateCost(audit.funnelModel, fIn, fOut)) ?? 0;
 
       // Analysis tokens (OpenAI) — stored in JSON
       const analysis = audit.aiAnalysis as Record<string, unknown> | null;
@@ -69,7 +69,7 @@ export async function GET() {
       const aOut = (analysis?.outputTokens as number | undefined) ?? 0;
       const aModel = (analysis?.model as string | undefined) ?? null;
       const analysisCost =
-        estimateCost(aModel, aIn, aOut) ??
+        (await estimateCost(aModel, aIn, aOut)) ??
         // Backward-compat for audits run before we tracked model.
         ((analysis?.estimatedCostUsd as number | undefined) ?? 0);
 
