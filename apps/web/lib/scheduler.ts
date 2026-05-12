@@ -74,10 +74,12 @@ export async function tick(): Promise<TickResult> {
       });
     }
 
-    // 4. Cleanup: drop FAILED audits older than CLEANUP_AGE_DAYS days.
+    // 4. Cleanup: drop FAILED and CANCELLED audits older than CLEANUP_AGE_DAYS.
+    //    Both use `failedAt` as the terminal-timestamp anchor (the cancel API
+    //    sets `failedAt` when flipping status, mirroring the FAILED path).
     const cleaned = await tx.audit.deleteMany({
       where: {
-        status: "FAILED",
+        status: { in: ["FAILED", "CANCELLED"] },
         failedAt: { lt: new Date(Date.now() - CLEANUP_AGE_DAYS * 86400_000) },
       },
     });

@@ -108,6 +108,7 @@ enum AuditStatus {
   RENDERING
   COMPLETE
   FAILED
+  CANCELLED
 }
 
 model Finding {

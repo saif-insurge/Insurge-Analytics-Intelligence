@@ -50,6 +50,7 @@ export default function AuditDetailPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
   const fetchAudit = useCallback(() => {
@@ -152,7 +153,33 @@ export default function AuditDetailPage() {
       </header>
 
       {/* In-progress state */}
-      {isInProgress && <InProgressBanner status={audit.status} />}
+      {isInProgress && (
+        <>
+          <InProgressBanner status={audit.status} />
+          <div className="mb-8 -mt-4 flex justify-end">
+            <button
+              onClick={async () => {
+                if (!confirm(`Cancel the audit for ${audit.domain}? The worker will stop within ~10 seconds.`)) return;
+                setCancelling(true);
+                try {
+                  const res = await fetch(`/api/audits/${audit.id}/cancel`, { method: "POST" });
+                  const d = await res.json();
+                  if (res.ok && d.cancelled) {
+                    fetchAudit();
+                  }
+                } finally {
+                  setCancelling(false);
+                }
+              }}
+              disabled={cancelling}
+              className="text-sm px-4 py-2 text-warning hover:bg-warning/[0.07] border border-warning/30 hover:border-warning/50 rounded-sm transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-2"
+            >
+              <span className="font-mono text-xs">⊘</span>
+              {cancelling ? "Cancelling…" : "Cancel audit"}
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Failed state */}
       {audit.status === "FAILED" && (

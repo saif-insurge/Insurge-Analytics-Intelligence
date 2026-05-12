@@ -30,7 +30,7 @@ type ApiResponse = {
   totalPages: number;
 };
 
-const STATUS_OPTIONS = ["PENDING", "RUNNING", "ANALYZING", "COMPLETE", "FAILED"];
+const STATUS_OPTIONS = ["PENDING", "RUNNING", "ANALYZING", "COMPLETE", "FAILED", "CANCELLED"];
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 export default function AuditsPage() {
@@ -65,6 +65,7 @@ function AuditsPageContent() {
   const [rowDelete, setRowDelete] = useState<Audit | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [rerunningId, setRerunningId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [newAuditOpen, setNewAuditOpen] = useState(false);
 
   // Debounce search
@@ -208,6 +209,30 @@ function AuditsPageContent() {
     const url = `${window.location.origin}/report/${audit.id}`;
     navigator.clipboard.writeText(url);
     toast.success("Share link copied");
+  }
+
+  async function handleCancel(audit: Audit) {
+    if (!confirm(`Cancel the audit for ${audit.domain}? The worker will stop within ~10 seconds.`)) return;
+    setCancellingId(audit.id);
+    try {
+      const res = await fetch(`/api/audits/${audit.id}/cancel`, { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) {
+        toast.error(d.error ?? "Failed to cancel");
+        return;
+      }
+      if (d.cancelled) {
+        toast.success(`Cancelled ${audit.domain}`);
+      } else {
+        toast.message(`Already ${d.currentStatus?.toLowerCase() ?? "terminal"} — no change`);
+      }
+      // Force a fetch so the badge flips immediately rather than waiting on poll.
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCancellingId(null);
+    }
   }
 
   const audits = data?.audits ?? [];
@@ -479,8 +504,10 @@ function AuditsPageContent() {
                   <RowActions
                     audit={audit}
                     rerunning={rerunningId === audit.id}
+                    cancelling={cancellingId === audit.id}
                     onRerun={() => handleRerun(audit)}
                     onCopyLink={() => handleCopyLink(audit)}
+                    onCancel={() => handleCancel(audit)}
                     onDelete={() => setRowDelete(audit)}
                   />
                 </div>
@@ -633,8 +660,10 @@ function AuditsPageContent() {
                       <RowActions
                         audit={audit}
                         rerunning={rerunningId === audit.id}
+                        cancelling={cancellingId === audit.id}
                         onRerun={() => handleRerun(audit)}
                         onCopyLink={() => handleCopyLink(audit)}
+                        onCancel={() => handleCancel(audit)}
                         onDelete={() => setRowDelete(audit)}
                       />
                     </td>
@@ -682,16 +711,21 @@ function AuditsPageContent() {
 function RowActions({
   audit,
   rerunning,
+  cancelling,
   onRerun,
   onCopyLink,
+  onCancel,
   onDelete,
 }: {
   audit: Audit;
   rerunning: boolean;
+  cancelling: boolean;
   onRerun: () => void;
   onCopyLink: () => void;
+  onCancel: () => void;
   onDelete: () => void;
 }) {
+  const cancellable = ["PENDING", "RUNNING", "ANALYZING", "RENDERING"].includes(audit.status);
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -766,6 +800,19 @@ function RowActions({
             </span>
           </DropdownMenu.Item>
 
+          {cancellable && (
+            <DropdownMenu.Item
+              onSelect={(e) => { e.preventDefault(); onCancel(); }}
+              disabled={cancelling}
+              className="flex items-center justify-between gap-3 px-2.5 py-2 text-sm text-warning hover:bg-warning/10 rounded-sm cursor-pointer outline-none data-[highlighted]:bg-warning/10 data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
+            >
+              <span className="flex items-center gap-2.5">
+                <Glyph>⊘</Glyph>
+                {cancelling ? "Cancelling…" : "Cancel audit"}
+              </span>
+            </DropdownMenu.Item>
+          )}
+
           <DropdownMenu.Separator className="h-px bg-border my-1" />
 
           <DropdownMenu.Item
@@ -834,6 +881,7 @@ function StatusBadge({ status }: { status: string }) {
     RENDERING: "bg-info/[0.08] text-info border-info/30",
     COMPLETE: "bg-accent/[0.08] text-accent border-accent/30",
     FAILED: "bg-danger/[0.08] text-danger border-danger/30",
+    CANCELLED: "bg-bg-subtle text-text-faint border-border-subtle",
   };
   return (
     <span
@@ -854,6 +902,7 @@ function statusActive(status: string): string {
     ANALYZING: "bg-info/15 text-info",
     COMPLETE: "bg-accent/15 text-accent",
     FAILED: "bg-danger/15 text-danger",
+    CANCELLED: "bg-bg-subtle text-text-faint",
   };
   return map[status] ?? "bg-accent/15 text-accent";
 }

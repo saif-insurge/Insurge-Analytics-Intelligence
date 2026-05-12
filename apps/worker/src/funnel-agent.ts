@@ -172,6 +172,8 @@ export async function runFunnelAgent(
   harEntries?: HarEntry[],
   /** Live reference to ALL network request URLs (for ad pixel detection). */
   allRequestUrls?: string[],
+  /** Abort signal — when triggered, Stagehand stops the agent loop cleanly. */
+  abortSignal?: AbortSignal,
 ): Promise<{
   agentResult: FunnelAgentResult | null;
   stepLogs: FunnelStepLog[];
@@ -445,6 +447,7 @@ export async function runFunnelAgent(
 
   try {
     const result = await agent.execute({
+      signal: abortSignal,
       instruction:
         `You are auditing ${siteUrl}. Complete ALL steps of the ecommerce funnel walkthrough:\n\n` +
         `1. HOME PAGE — observe the homepage (you're already here). Call logStep.\n` +

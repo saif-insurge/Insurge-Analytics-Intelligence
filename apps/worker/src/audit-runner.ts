@@ -40,6 +40,8 @@ export type AuditRunnerOptions = {
   persistToDb?: boolean;
   /** Email to notify when audit is complete. */
   notifyEmail?: string;
+  /** Abort signal — when triggered, the funnel walk is cancelled cleanly. */
+  abortSignal?: AbortSignal;
 };
 
 export type FunnelStepLog = {
@@ -236,7 +238,7 @@ export async function runAuditPipeline(
   // ─── 3. Walk the funnel using autonomous agent ─────────────────────
   try {
     console.log("Starting funnel agent...");
-    const { agentResult, stepLogs, usage, model } = await runFunnelAgent(stagehand, url, har.entries, allRequestUrls);
+    const { agentResult, stepLogs, usage, model } = await runFunnelAgent(stagehand, url, har.entries, allRequestUrls, options.abortSignal);
     funnelLog = stepLogs;
     funnelModel = model;
     if (usage) {

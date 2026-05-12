@@ -38,12 +38,29 @@ app.post("/audit", async (c) => {
   const existing = await prisma.audit.findUnique({ where: { id: auditId } });
   if (!existing) return c.json({ error: "Audit not found" }, 404);
 
-  // Idempotency: COMPLETE/FAILED audits are no-ops. PENDING shouldn't reach us
+  // Idempotency: terminal audits are no-ops. PENDING shouldn't reach us
   // (the scheduler claims rows as RUNNING before dispatch), but tolerate it.
-  if (existing.status === "COMPLETE" || existing.status === "FAILED") {
+  if (existing.status === "COMPLETE" || existing.status === "FAILED" || existing.status === "CANCELLED") {
     pingScheduler();
     return c.json({ message: "Already terminal", auditId, status: existing.status }, 200);
   }
+
+  // Cancellation plumbing: poll the DB every 5s and abort Stagehand cleanly
+  // if the user (or anything else) flips status=CANCELLED. The poll loop
+  // shuts down in the `finally` so it doesn't leak across requests.
+  const ac = new AbortController();
+  const pollInterval = setInterval(async () => {
+    try {
+      const r = await prisma.audit.findUnique({ where: { id: auditId }, select: { status: true } });
+      if (r?.status === "CANCELLED") {
+        console.log(`[${auditId}] Cancellation detected via DB poll — aborting.`);
+        ac.abort();
+      }
+    } catch {
+      // Swallow — next tick retries. We never want polling failures to
+      // crash the audit handler.
+    }
+  }, 5000);
 
   try {
     await runAuditPipeline({
@@ -53,10 +70,14 @@ app.post("/audit", async (c) => {
       organizationId: existing.organizationId,
       userId: existing.createdById,
       notifyEmail: existing.notifyEmail ?? undefined,
+      abortSignal: ac.signal,
       onStatus: async (status) => {
         try {
-          await prisma.audit.update({
-            where: { id: auditId },
+          // updateMany with a "notIn" guard: if the row is already CANCELLED
+          // (or FAILED, defensively), don't overwrite. This is the race-safe
+          // way to handle cancel-during-transition.
+          await prisma.audit.updateMany({
+            where: { id: auditId, status: { notIn: ["CANCELLED", "FAILED"] } },
             data: {
               status: status as "RUNNING" | "ANALYZING" | "RENDERING" | "COMPLETE",
               ...(status === "RUNNING" ? { startedAt: new Date() } : {}),
@@ -72,6 +93,14 @@ app.post("/audit", async (c) => {
     });
     return c.json({ ok: true, auditId });
   } catch (err) {
+    // If the user cancelled, the row is already in CANCELLED state — don't
+    // overwrite it with FAILED. Just exit cleanly so the slot frees up.
+    const current = await prisma.audit.findUnique({ where: { id: auditId }, select: { status: true } }).catch(() => null);
+    if (current?.status === "CANCELLED") {
+      console.log(`[${auditId}] Audit cancelled by user — pipeline aborted cleanly.`);
+      return c.json({ cancelled: true, auditId }, 200);
+    }
+
     console.error(`[${auditId}] Audit failed:`, err);
     try {
       await prisma.audit.update({
@@ -88,6 +117,7 @@ app.post("/audit", async (c) => {
     }
     return c.json({ error: "Audit failed", auditId }, 500);
   } finally {
+    clearInterval(pollInterval);
     // Free the next slot immediately — fire-and-forget ping back to the web
     // scheduler. If the ping fails, the Coolify cron will catch up within 60s.
     pingScheduler();
